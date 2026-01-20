@@ -141,6 +141,12 @@ contract DNASubscriber is ISubscriber {
     /// @notice State View contract for reading pool state
     IStateViewMinimal public immutable stateView;
 
+    /// @notice Owner of this contract (can manage allowlist)
+    address public owner;
+
+    /// @notice Allowed callers for recordSwap (trusted hooks/indexers)
+    mapping(address => bool) public allowedCallers;
+
     /// @notice User statistics
     mapping(address => UserStats) public userStats;
 
@@ -179,6 +185,19 @@ contract DNASubscriber is ISubscriber {
     constructor(address _posm, address _stateView) {
         posm = IPositionManagerMinimal(_posm);
         stateView = IStateViewMinimal(_stateView);
+        owner = msg.sender;
+    }
+
+    // ============ Modifiers ============
+
+    modifier onlyOwner() {
+        if (msg.sender != owner) revert Unauthorized();
+        _;
+    }
+
+    modifier onlyAllowedCaller() {
+        if (!allowedCallers[msg.sender] && msg.sender != owner) revert InvalidCaller();
+        _;
     }
 
     // ============ ISubscriber Implementation ============
@@ -198,6 +217,11 @@ contract DNASubscriber is ISubscriber {
         int24 tickLower = info.tickLower();
         int24 tickUpper = info.tickUpper();
 
+        // Check if position was previously subscribed (e.g., after transfer)
+        PositionData storage pos = positions[tokenId];
+        bool isResubscribe = PoolId.unwrap(pos.poolId) == PoolId.unwrap(poolId) && !pos.isActive;
+        address oldOwner = pos.owner;
+
         // Register user if new
         if (!isRegisteredUser[owner]) {
             _registerUser(owner);
@@ -206,11 +230,18 @@ contract DNASubscriber is ISubscriber {
         // Update user stats
         UserStats storage stats = userStats[owner];
         stats.lastActionTimestamp = uint64(block.timestamp);
-        stats.totalPositions++;
+        
+        if (!isResubscribe) {
+            // New position
+            stats.totalPositions++;
+            totalPositionsCreated++;
+        } else if (oldOwner != owner) {
+            // Ownership changed - update mappings
+            _syncOwnership(tokenId, oldOwner, owner);
+        }
+        
         stats.activePositions++;
         stats.totalLiquidityProvided += liquidity;
-
-        totalPositionsCreated++;
 
         // Track unique pools
         if (!userPoolInteraction[owner][poolIdBytes]) {
@@ -219,18 +250,21 @@ contract DNASubscriber is ISubscriber {
             _checkPoolMilestones(owner, stats.uniquePools);
         }
 
-        // Store position data
+        // Update or create position data
         positions[tokenId] = PositionData({
             owner: owner,
             poolId: poolId,
             tickLower: tickLower,
             tickUpper: tickUpper,
             liquidity: liquidity,
-            createdAt: uint64(block.timestamp),
+            createdAt: isResubscribe ? pos.createdAt : uint64(block.timestamp), // Keep original creation time
             isActive: true
         });
 
-        ownerTokenIds[owner].push(tokenId);
+        // Add to owner's token list if not already there
+        if (!isResubscribe || oldOwner != owner) {
+            ownerTokenIds[owner].push(tokenId);
+        }
 
         // Check position milestones
         _checkPositionMilestones(owner, stats.totalPositions);
@@ -255,24 +289,33 @@ contract DNASubscriber is ISubscriber {
     }
 
     /// @notice Called when a position unsubscribes
+    /// @dev This is called on transfer - we sync ownership if position still exists
     /// @param tokenId The token ID of the position
     function notifyUnsubscribe(uint256 tokenId) external onlyPositionManager {
         PositionData storage pos = positions[tokenId];
         require(pos.isActive, "DNASubscriber: position not active");
 
-        address owner = pos.owner;
+        address oldOwner = pos.owner;
         PoolId poolId = pos.poolId;
 
-        // Update user stats
-        UserStats storage stats = userStats[owner];
-        stats.activePositions--;
-        stats.lastActionTimestamp = uint64(block.timestamp);
+        // Check current owner - if different, this is a transfer
+        address currentOwner = posm.ownerOf(tokenId);
+        
+        // Update user stats for old owner
+        UserStats storage oldStats = userStats[oldOwner];
+        oldStats.activePositions--;
+        oldStats.lastActionTimestamp = uint64(block.timestamp);
 
-        // Mark position as inactive
+        // Mark position as inactive (will be reactivated if new owner subscribes)
         pos.isActive = false;
 
+        // If ownership changed (transfer case), sync ownership
+        if (currentOwner != oldOwner && currentOwner != address(0)) {
+            _syncOwnership(tokenId, oldOwner, currentOwner);
+        }
+
         emit UserAction(
-            owner,
+            oldOwner,
             poolId,
             tokenId,
             ActionType.UNSUBSCRIBE,
@@ -283,10 +326,10 @@ contract DNASubscriber is ISubscriber {
         );
 
         emit StatsUpdated(
-            owner,
-            stats.totalPositions,
-            stats.activePositions,
-            stats.totalFeesEarned
+            oldOwner,
+            oldStats.totalPositions,
+            oldStats.activePositions,
+            oldStats.totalFeesEarned
         );
     }
 
@@ -424,8 +467,7 @@ contract DNASubscriber is ISubscriber {
         address user,
         PoolId poolId,
         uint128 volumeUsd
-    ) external {
-        // In production, add access control
+    ) external onlyAllowedCaller {
         bytes32 poolIdBytes = PoolId.unwrap(poolId);
         
         if (!isRegisteredUser[user]) {
@@ -695,6 +737,79 @@ contract DNASubscriber is ISubscriber {
         if (volumeInUnits >= 1_000_000 && !status.volume1M) {
             status.volume1M = true;
             emit UserMilestone(user, MilestoneType.TOTAL_VOLUME_1M, volumeInUnits, block.timestamp);
+        }
+    }
+
+    /// @notice Sync ownership when a position is transferred
+    /// @dev Updates internal mappings to reflect new owner
+    /// @param tokenId The token ID
+    /// @param oldOwner The previous owner
+    /// @param newOwner The new owner
+    function _syncOwnership(uint256 tokenId, address oldOwner, address newOwner) internal {
+        // Update position owner
+        positions[tokenId].owner = newOwner;
+
+        // Remove from old owner's list (find and remove)
+        uint256[] storage oldOwnerTokens = ownerTokenIds[oldOwner];
+        for (uint256 i = 0; i < oldOwnerTokens.length; i++) {
+            if (oldOwnerTokens[i] == tokenId) {
+                // Swap with last element and pop
+                oldOwnerTokens[i] = oldOwnerTokens[oldOwnerTokens.length - 1];
+                oldOwnerTokens.pop();
+                break;
+            }
+        }
+
+        // Add to new owner's list (if not already there)
+        uint256[] storage newOwnerTokens = ownerTokenIds[newOwner];
+        bool alreadyExists = false;
+        for (uint256 i = 0; i < newOwnerTokens.length; i++) {
+            if (newOwnerTokens[i] == tokenId) {
+                alreadyExists = true;
+                break;
+            }
+        }
+        if (!alreadyExists) {
+            newOwnerTokens.push(tokenId);
+        }
+
+        // Register new owner if not registered
+        if (!isRegisteredUser[newOwner]) {
+            _registerUser(newOwner);
+        }
+    }
+
+    // ============ Access Control Management ============
+
+    /// @notice Set the owner (only callable by current owner)
+    /// @param newOwner The new owner address
+    function setOwner(address newOwner) external onlyOwner {
+        owner = newOwner;
+    }
+
+    /// @notice Add an allowed caller for recordSwap
+    /// @param caller The address to allow
+    function addAllowedCaller(address caller) external onlyOwner {
+        allowedCallers[caller] = true;
+    }
+
+    /// @notice Remove an allowed caller for recordSwap
+    /// @param caller The address to remove
+    function removeAllowedCaller(address caller) external onlyOwner {
+        allowedCallers[caller] = false;
+    }
+
+    /// @notice Public function to sync ownership (callable by anyone)
+    /// @dev Useful for keeping data in sync after transfers
+    /// @param tokenId The token ID to sync
+    function syncOwnership(uint256 tokenId) external {
+        PositionData storage pos = positions[tokenId];
+        address currentOwner = posm.ownerOf(tokenId);
+        
+        // Only sync if ownership changed
+        if (currentOwner != pos.owner && currentOwner != address(0)) {
+            address oldOwner = pos.owner;
+            _syncOwnership(tokenId, oldOwner, currentOwner);
         }
     }
 }
