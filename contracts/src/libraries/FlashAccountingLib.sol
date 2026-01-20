@@ -348,15 +348,65 @@ library FlashAccountingLib {
     // ============ Helper Functions ============
 
     /// @notice Calculate net deltas for multi-step operations
-    /// @dev TEACHING: Useful for previewing what you'll owe after complex operations
+    /// @dev Groups deltas by currency and sums amounts, returning unique currencies with net amounts
+    /// @param deltas Array of currency deltas to net
+    /// @return netDeltas Array of unique currencies with summed amounts
     function calculateNetDeltas(
         CurrencyDelta[] memory deltas
     ) internal pure returns (CurrencyDelta[] memory netDeltas) {
-        // Group by currency and sum
-        // Simplified implementation - in production use a map
+        if (deltas.length == 0) {
+            return new CurrencyDelta[](0);
+        }
 
-        // For teaching purposes, assume we already have net deltas
-        return deltas;
+        // Sort deltas by currency address for deterministic grouping
+        // Using insertion sort (simple for small arrays, gas-efficient)
+        CurrencyDelta[] memory sorted = new CurrencyDelta[](deltas.length);
+        for (uint256 i = 0; i < deltas.length; i++) {
+            sorted[i] = deltas[i];
+            uint256 j = i;
+            while (j > 0 && Currency.unwrap(sorted[j - 1].currency) > Currency.unwrap(sorted[j].currency)) {
+                CurrencyDelta memory temp = sorted[j];
+                sorted[j] = sorted[j - 1];
+                sorted[j - 1] = temp;
+                j--;
+            }
+        }
+
+        // Count unique currencies
+        uint256 uniqueCount = 1;
+        for (uint256 i = 1; i < sorted.length; i++) {
+            if (Currency.unwrap(sorted[i].currency) != Currency.unwrap(sorted[i - 1].currency)) {
+                uniqueCount++;
+            }
+        }
+
+        // Group and sum by currency
+        netDeltas = new CurrencyDelta[](uniqueCount);
+        uint256 netIndex = 0;
+        Currency currentCurrency = sorted[0].currency;
+        int256 currentSum = sorted[0].amount;
+
+        for (uint256 i = 1; i < sorted.length; i++) {
+            if (Currency.unwrap(sorted[i].currency) == Currency.unwrap(currentCurrency)) {
+                // Same currency, accumulate
+                currentSum += sorted[i].amount;
+            } else {
+                // New currency, save previous and start new
+                netDeltas[netIndex] = CurrencyDelta({
+                    currency: currentCurrency,
+                    amount: currentSum
+                });
+                netIndex++;
+                currentCurrency = sorted[i].currency;
+                currentSum = sorted[i].amount;
+            }
+        }
+
+        // Add the last currency
+        netDeltas[netIndex] = CurrencyDelta({
+            currency: currentCurrency,
+            amount: currentSum
+        });
     }
 
     /// @notice Check if all deltas are settled (= 0)

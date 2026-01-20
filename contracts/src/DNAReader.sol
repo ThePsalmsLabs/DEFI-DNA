@@ -7,6 +7,8 @@ import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
 import {PositionInfo, PositionInfoLibrary} from "@uniswap/v4-periphery/src/libraries/PositionInfoLibrary.sol";
 import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
+import {FullMath} from "@uniswap/v4-core/src/libraries/FullMath.sol";
+import {FixedPoint96} from "@uniswap/v4-core/src/libraries/FixedPoint96.sol";
 
 /// @notice Minimal interface for PositionManager functions we need
 interface IPositionManagerMinimal {
@@ -254,6 +256,7 @@ contract DNAReader {
     // ============ Utility Functions ============
 
     /// @notice Convert sqrtPriceX96 to human-readable price
+    /// @dev Uses FullMath.mulDiv to prevent overflow
     /// @param sqrtPriceX96 The sqrt price in Q96 format
     /// @param decimals0 Decimals of token0
     /// @param decimals1 Decimals of token1
@@ -263,11 +266,26 @@ contract DNAReader {
         uint8 decimals0,
         uint8 decimals1
     ) external pure returns (uint256 price) {
-        uint256 sqrtPrice = uint256(sqrtPriceX96);
-        uint256 numerator = sqrtPrice * sqrtPrice;
-        uint256 denominator = 1 << 192;
+        // Price formula: (sqrtPriceX96 / 2^96)^2 * (10^decimals0 / 10^decimals1) * 1e18
+        // = (sqrtPriceX96^2 * 10^decimals0 * 1e18) / (2^192 * 10^decimals1)
+        // To avoid overflow, we use FullMath.mulDiv for the entire calculation
         
-        price = (numerator * 1e18 * 10 ** decimals0) / (denominator * 10 ** decimals1);
+        uint256 sqrtPrice = uint256(sqrtPriceX96);
+        uint256 numerator = sqrtPrice * sqrtPrice; // sqrtPriceX96^2
+        
+        // Calculate decimals multiplier
+        uint256 decimalsMultiplier = 10 ** decimals0;
+        uint256 decimalsDivisor = 10 ** decimals1;
+        
+        // Denominator = 2^192 * 10^decimals1
+        uint256 denominator = (1 << 192) * decimalsDivisor;
+        
+        // Use FullMath to safely calculate: (numerator * 1e18 * decimalsMultiplier) / denominator
+        price = FullMath.mulDiv(
+            numerator,
+            1e18 * decimalsMultiplier,
+            denominator
+        );
     }
 
     /// @notice Convert tick to sqrtPriceX96
