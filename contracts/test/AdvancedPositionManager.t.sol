@@ -82,6 +82,7 @@ contract MockPositionManagerForAPM {
     }
 
     function modifyLiquidities(bytes calldata, uint256) external payable {}
+    function modifyLiquiditiesWithoutUnlock(bytes calldata, bytes[] calldata) external payable {}
 }
 
 /// @title AdvancedPositionManagerTest
@@ -230,7 +231,7 @@ contract AdvancedPositionManagerTest is Test {
         address testToken = makeAddr("token");
         
         vm.prank(bob);
-        vm.expectRevert("Only owner");
+        vm.expectRevert(AdvancedPositionManager.Unauthorized.selector);
         apm.rescueTokens(testToken, alice, 1000);
     }
 
@@ -312,9 +313,10 @@ contract AdvancedPositionManagerTest is Test {
         );
 
         // Bob tries to rebalance Alice's position
+        FlashAccountingLib.CurrencyDelta[] memory emptyDeltas = new FlashAccountingLib.CurrencyDelta[](0);
         vm.prank(bob);
-        vm.expectRevert("Not position owner");
-        apm.rebalancePosition(tokenId, -1000, 1000);
+        vm.expectRevert(AdvancedPositionManager.PositionNotOwned.selector);
+        apm.rebalancePosition(tokenId, -1000, 1000, emptyDeltas);
     }
 
     /// @notice Test rebalance requires valid tick range
@@ -329,25 +331,14 @@ contract AdvancedPositionManagerTest is Test {
         );
 
         // Alice tries invalid tick range
+        FlashAccountingLib.CurrencyDelta[] memory emptyDeltas = new FlashAccountingLib.CurrencyDelta[](0);
         vm.prank(alice);
-        vm.expectRevert("Invalid tick range");
-        apm.rebalancePosition(tokenId, 1000, -1000);
+        vm.expectRevert(AdvancedPositionManager.InvalidTickRange.selector);
+        apm.rebalancePosition(tokenId, 1000, -1000, emptyDeltas);
     }
 
-    /// @notice Test compound fees requires ownership
-    function test_RevertWhen_CompoundFees_NotOwner() public {
-        uint256 tokenId = mockPositionManager.mint(
-            alice,
-            ethUsdcPool,
-            -887220,
-            887220,
-            1000e18
-        );
-
-        vm.prank(bob);
-        vm.expectRevert("Not owner");
-        apm.compoundFees(tokenId);
-    }
+    // Note: compoundFees function removed - functionality can be added back if needed
+    // Keeping test structure for potential future implementation
 
     /// @notice Test cross pool rebalance requires ownership
     function test_RevertWhen_RebalanceCrossPools_NotOwner() public {
@@ -367,9 +358,10 @@ contract AdvancedPositionManagerTest is Test {
             hooks: IHooks(address(0))
         });
 
+        FlashAccountingLib.CurrencyDelta[] memory emptyDeltas = new FlashAccountingLib.CurrencyDelta[](0);
         vm.prank(bob);
-        vm.expectRevert("Not owner");
-        apm.rebalanceCrossPools(tokenId, newPool, -1000, 1000);
+        vm.expectRevert(AdvancedPositionManager.PositionNotOwned.selector);
+        apm.rebalanceCrossPools(tokenId, newPool, -1000, 1000, emptyDeltas);
     }
 
     /// @notice Test cross pool rebalance requires matching currencies
@@ -391,8 +383,9 @@ contract AdvancedPositionManagerTest is Test {
             hooks: IHooks(address(0))
         });
 
+        FlashAccountingLib.CurrencyDelta[] memory emptyDeltas = new FlashAccountingLib.CurrencyDelta[](0);
         vm.prank(alice);
-        vm.expectRevert("Currency mismatch");
-        apm.rebalanceCrossPools(tokenId, newPool, -1000, 1000);
+        vm.expectRevert(AdvancedPositionManager.CurrencyMismatch.selector);
+        apm.rebalanceCrossPools(tokenId, newPool, -1000, 1000, emptyDeltas);
     }
 }
