@@ -45,6 +45,11 @@ fork_url = "${BASE_SEPOLIA_RPC_URL}"
 fork_block_number = 0  # Use latest block
 
 [rpc_endpoints]
+# Base Network RPCs (Alchemy)
+base_mainnet = "https://base-mainnet.g.alchemy.com/v2/f_SNCtMgIYAJswII3Y2BkjcSAWMpfNTh"
+base_sepolia = "https://base-sepolia.g.alchemy.com/v2/f_SNCtMgIYAJswII3Y2BkjcSAWMpfNTh"
+
+# Ethereum Network RPCs (fallback)
 mainnet = "${MAINNET_RPC_URL}"
 sepolia = "${SEPOLIA_RPC_URL}"
 baseSepolia = "${BASE_SEPOLIA_RPC_URL}"
@@ -52,6 +57,11 @@ base = "${BASE_RPC_URL}"
 localhost = "http://127.0.0.1:8545"
 
 [etherscan]
+# Base Network (uses Basescan)
+base_mainnet = { key = "${BASESCAN_API_KEY}", url = "https://api.basescan.org/api" }
+base_sepolia = { key = "${BASESCAN_API_KEY}", url = "https://api-sepolia.basescan.org/api" }
+
+# Ethereum Network (fallback)
 mainnet = { key = "${ETHERSCAN_API_KEY}" }
 sepolia = { key = "${ETHERSCAN_API_KEY}" }
 baseSepolia = { key = "${BASESCAN_API_KEY}" }
