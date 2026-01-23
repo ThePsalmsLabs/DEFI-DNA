@@ -60,6 +60,14 @@ contract DNASubscriber is ISubscriber {
         uint128 totalFeesEarned
     );
 
+    // ============ Errors ============
+
+    /// @notice Thrown when caller is not authorized
+    error Unauthorized();
+
+    /// @notice Thrown when caller is not allowed to call recordSwap
+    error InvalidCaller();
+
     // ============ Enums ============
 
     enum ActionType {
