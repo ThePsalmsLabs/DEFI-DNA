@@ -30,13 +30,13 @@ export function ConnectButton() {
 
   if (!isConnected) {
     return (
-      <div className="relative">
+      <div className="relative w-full">
         <button
           onClick={() => setShowConnectors(!showConnectors)}
           disabled={isPending}
-          className="flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-primary-500 to-purple-500 text-white font-medium rounded-xl hover:opacity-90 transition disabled:opacity-50"
+          className="w-full flex items-center justify-center gap-2 px-8 py-4 bg-gradient-to-r from-primary-500 to-purple-500 text-white font-semibold rounded-xl hover:opacity-90 transition disabled:opacity-50 shadow-glow"
         >
-          <Wallet className="w-4 h-4" />
+          <Wallet className="w-5 h-5" />
           {isPending ? 'Connecting...' : 'Connect Wallet'}
         </button>
 

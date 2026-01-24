@@ -46,22 +46,24 @@ export default function HomePage() {
             </p>
 
             {/* CTA Buttons */}
-            <div className="flex flex-col sm:flex-row gap-4 justify-center">
+            <div className="flex flex-col sm:flex-row gap-4 justify-center items-center">
               {isConnected ? (
                 <Link
                   href={`/profile/${address}`}
-                  className="inline-flex items-center gap-2 px-8 py-4 bg-gradient-to-r from-primary-500 to-purple-500 text-white font-semibold rounded-xl hover:opacity-90 transition shadow-glow"
+                  className="inline-flex items-center justify-center gap-2 px-8 py-4 bg-gradient-to-r from-primary-500 to-purple-500 text-white font-semibold rounded-xl hover:opacity-90 transition shadow-glow min-w-[200px]"
                 >
                   View My DNA
                   <ArrowRight className="w-5 h-5" />
                 </Link>
               ) : (
-                <ConnectButton />
+                <div className="min-w-[200px]">
+                  <ConnectButton />
+                </div>
               )}
               
               <Link
                 href="/leaderboard"
-                className="inline-flex items-center gap-2 px-8 py-4 bg-gray-800 text-white font-semibold rounded-xl hover:bg-gray-700 transition border border-gray-700"
+                className="inline-flex items-center justify-center gap-2 px-8 py-4 bg-gray-800 text-white font-semibold rounded-xl hover:bg-gray-700 transition border border-gray-700 min-w-[200px]"
               >
                 <Trophy className="w-5 h-5" />
                 Leaderboard

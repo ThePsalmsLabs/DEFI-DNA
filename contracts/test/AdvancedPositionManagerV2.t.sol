@@ -8,7 +8,10 @@ import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 import {PoolId, PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {Currency, CurrencyLibrary} from "@uniswap/v4-core/src/types/Currency.sol";
 import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
-import {PositionInfo, PositionInfoLibrary} from "@uniswap/v4-periphery/src/libraries/PositionInfoLibrary.sol";
+import {
+    PositionInfo,
+    PositionInfoLibrary
+} from "@uniswap/v4-periphery/src/libraries/PositionInfoLibrary.sol";
 import {BalanceDelta, toBalanceDelta} from "@uniswap/v4-core/src/types/BalanceDelta.sol";
 
 /// @title MockPoolManagerForV2
@@ -20,7 +23,10 @@ contract MockPoolManagerForV2 {
     }
 
     function take(Currency, address, uint256) external {}
-    function settle() external payable returns (uint256) { return msg.value; }
+
+    function settle() external payable returns (uint256) {
+        return msg.value;
+    }
 }
 
 /// @title MockPositionManagerForV2
@@ -75,13 +81,11 @@ contract MockPositionManagerForV2 {
         info = PositionInfoLibrary.initialize(poolKey, pos.tickLower, pos.tickUpper);
     }
 
-    function modifyLiquidity(
-        uint256,
-        int256,
-        uint128,
-        uint128,
-        bytes calldata
-    ) external pure returns (BalanceDelta) {
+    function modifyLiquidity(uint256, int256, uint128, uint128, bytes calldata)
+        external
+        pure
+        returns (BalanceDelta)
+    {
         // Mock delta
         return toBalanceDelta(int128(100), int128(200));
     }
@@ -128,10 +132,7 @@ contract AdvancedPositionManagerV2Test is Test {
         mockPositionManager = new MockPositionManagerForV2();
 
         // Deploy AdvancedPositionManagerV2
-        apm = new AdvancedPositionManagerV2(
-            address(mockPoolManager),
-            address(mockPositionManager)
-        );
+        apm = new AdvancedPositionManagerV2(address(mockPoolManager), address(mockPositionManager));
 
         // Setup roles
         apm.grantRole(apm.OPERATOR_ROLE(), operator);
@@ -151,8 +152,8 @@ contract AdvancedPositionManagerV2Test is Test {
         aliceTokenId = mockPositionManager.mint(
             alice,
             testPoolKey,
-            -120,  // tickLower
-            120,   // tickUpper
+            -120, // tickLower
+            120, // tickUpper
             1000 ether
         );
     }
@@ -208,10 +209,10 @@ contract AdvancedPositionManagerV2Test is Test {
         vm.expectRevert(AdvancedPositionManagerV2.PositionNotOwned.selector);
         apm.rebalancePosition(
             aliceTokenId,
-            -60,   // newTickLower
-            60,    // newTickUpper
-            0,     // minDelta0
-            0,     // minDelta1
+            -60, // newTickLower
+            60, // newTickUpper
+            0, // minDelta0
+            0, // minDelta1
             block.timestamp + 1 hours
         );
     }
@@ -221,8 +222,8 @@ contract AdvancedPositionManagerV2Test is Test {
         vm.expectRevert(AdvancedPositionManagerV2.InvalidTickRange.selector);
         apm.rebalancePosition(
             aliceTokenId,
-            60,    // newTickLower (higher than upper!)
-            -60,   // newTickUpper
+            60, // newTickLower (higher than upper!)
+            -60, // newTickUpper
             0,
             0,
             block.timestamp + 1 hours
@@ -238,7 +239,7 @@ contract AdvancedPositionManagerV2Test is Test {
             60,
             0,
             0,
-            block.timestamp - 1  // Expired deadline
+            block.timestamp - 1 // Expired deadline
         );
     }
 
@@ -249,15 +250,8 @@ contract AdvancedPositionManagerV2Test is Test {
 
         // Try to rebalance
         vm.prank(alice);
-        vm.expectRevert();  // Pausable.EnforcedPause
-        apm.rebalancePosition(
-            aliceTokenId,
-            -60,
-            60,
-            0,
-            0,
-            block.timestamp + 1 hours
-        );
+        vm.expectRevert(); // Pausable.EnforcedPause
+        apm.rebalancePosition(aliceTokenId, -60, 60, 0, 0, block.timestamp + 1 hours);
     }
 
     // ============ Emergency Functions Tests ============
@@ -358,31 +352,28 @@ contract AdvancedPositionManagerV2Test is Test {
 
     function test_GetPositionOwner() public view {
         address owner = apm.getPositionOwner(aliceTokenId);
-        assertEq(owner, address(0));  // Not tracked yet
+        assertEq(owner, address(0)); // Not tracked yet
     }
 
     function test_SupportsInterface() public view {
         // IUnlockCallback interface ID
-        bytes4 unlockCallbackId = 0x91dd7346;  // IUnlockCallback.interfaceId
+        bytes4 unlockCallbackId = 0x91dd7346; // IUnlockCallback.interfaceId
         assertTrue(apm.supportsInterface(unlockCallbackId));
     }
 
     // ============ Constants Tests ============
 
     function test_Constants() public view {
-        assertEq(apm.MAX_SLIPPAGE_BPS(), 500);  // 5%
+        assertEq(apm.MAX_SLIPPAGE_BPS(), 500); // 5%
         assertEq(apm.EMERGENCY_WITHDRAWAL_DELAY(), 24 hours);
     }
 
     // ============ Fuzz Tests ============
 
-    function testFuzz_RebalancePosition_ValidTicks(
-        int24 newTickLower,
-        int24 newTickUpper
-    ) public {
+    function testFuzz_RebalancePosition_ValidTicks(int24 newTickLower, int24 newTickUpper) public {
         // Bound ticks to valid range
-        newTickLower = int24(bound(int256(newTickLower), -887220, 887219));
-        newTickUpper = int24(bound(int256(newTickUpper), int256(newTickLower) + 1, 887220));
+        newTickLower = int24(bound(int256(newTickLower), -887_220, 887_219));
+        newTickUpper = int24(bound(int256(newTickUpper), int256(newTickLower) + 1, 887_220));
 
         // This would need proper mocking to execute fully
         // For now, we verify inputs are valid

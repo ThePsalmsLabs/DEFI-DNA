@@ -9,7 +9,10 @@ import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 import {PoolId, PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {Currency, CurrencyLibrary} from "@uniswap/v4-core/src/types/Currency.sol";
 import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
-import {PositionInfo, PositionInfoLibrary} from "@uniswap/v4-periphery/src/libraries/PositionInfoLibrary.sol";
+import {
+    PositionInfo,
+    PositionInfoLibrary
+} from "@uniswap/v4-periphery/src/libraries/PositionInfoLibrary.sol";
 
 /// @title MockPoolManager
 /// @notice Mock contract for testing AdvancedPositionManager
@@ -23,7 +26,10 @@ contract MockPoolManager {
     }
 
     function sync(Currency) external {}
-    function settle() external payable returns (uint256) { return msg.value; }
+
+    function settle() external payable returns (uint256) {
+        return msg.value;
+    }
     function take(Currency, address, uint256) external {}
     function mint(address, uint256, uint256) external {}
     function burn(address, uint256, uint256) external {}
@@ -112,10 +118,7 @@ contract AdvancedPositionManagerTest is Test {
         mockPositionManager = new MockPositionManagerForAPM();
 
         // Deploy our advanced position manager with mocks
-        apm = new AdvancedPositionManager(
-            address(mockPoolManager),
-            address(mockPositionManager)
-        );
+        apm = new AdvancedPositionManager(address(mockPoolManager), address(mockPositionManager));
 
         // Setup test pool
         ethUsdcPool = PoolKey({
@@ -136,18 +139,13 @@ contract AdvancedPositionManagerTest is Test {
 
     /// @notice Test delta validation
     function test_ValidateDeltas_Success() public pure {
-        FlashAccountingLib.CurrencyDelta[] memory deltas =
-            new FlashAccountingLib.CurrencyDelta[](2);
+        FlashAccountingLib.CurrencyDelta[] memory deltas = new FlashAccountingLib.CurrencyDelta[](2);
 
-        deltas[0] = FlashAccountingLib.CurrencyDelta({
-            currency: Currency.wrap(address(0)),
-            amount: 1000
-        });
+        deltas[0] =
+            FlashAccountingLib.CurrencyDelta({currency: Currency.wrap(address(0)), amount: 1000});
 
-        deltas[1] = FlashAccountingLib.CurrencyDelta({
-            currency: Currency.wrap(address(0x1)),
-            amount: 500
-        });
+        deltas[1] =
+            FlashAccountingLib.CurrencyDelta({currency: Currency.wrap(address(0x1)), amount: 500});
 
         int256[] memory minExpected = new int256[](2);
         minExpected[0] = 1000;
@@ -162,38 +160,28 @@ contract AdvancedPositionManagerTest is Test {
         FlashAccountingLib.CurrencyDelta[] memory settledDeltas =
             new FlashAccountingLib.CurrencyDelta[](2);
 
-        settledDeltas[0] = FlashAccountingLib.CurrencyDelta({
-            currency: Currency.wrap(address(0)),
-            amount: 0
-        });
+        settledDeltas[0] =
+            FlashAccountingLib.CurrencyDelta({currency: Currency.wrap(address(0)), amount: 0});
 
-        settledDeltas[1] = FlashAccountingLib.CurrencyDelta({
-            currency: Currency.wrap(address(0x1)),
-            amount: 0
-        });
+        settledDeltas[1] =
+            FlashAccountingLib.CurrencyDelta({currency: Currency.wrap(address(0x1)), amount: 0});
 
         assertTrue(
-            FlashAccountingLib.areAllDeltasSettled(settledDeltas),
-            "All deltas should be settled"
+            FlashAccountingLib.areAllDeltasSettled(settledDeltas), "All deltas should be settled"
         );
 
         // Test with unsettled deltas
         FlashAccountingLib.CurrencyDelta[] memory unsettledDeltas =
             new FlashAccountingLib.CurrencyDelta[](2);
 
-        unsettledDeltas[0] = FlashAccountingLib.CurrencyDelta({
-            currency: Currency.wrap(address(0)),
-            amount: 100
-        });
+        unsettledDeltas[0] =
+            FlashAccountingLib.CurrencyDelta({currency: Currency.wrap(address(0)), amount: 100});
 
-        unsettledDeltas[1] = FlashAccountingLib.CurrencyDelta({
-            currency: Currency.wrap(address(0x1)),
-            amount: 0
-        });
+        unsettledDeltas[1] =
+            FlashAccountingLib.CurrencyDelta({currency: Currency.wrap(address(0x1)), amount: 0});
 
         assertFalse(
-            FlashAccountingLib.areAllDeltasSettled(unsettledDeltas),
-            "Deltas should not be settled"
+            FlashAccountingLib.areAllDeltasSettled(unsettledDeltas), "Deltas should not be settled"
         );
     }
 
@@ -201,8 +189,7 @@ contract AdvancedPositionManagerTest is Test {
 
     /// @notice Test user statistics tracking
     function test_GetUserStats() public view {
-        (uint256 operations, uint256 gasUsed, uint256 avgGas) =
-            apm.getUserStats(alice);
+        (uint256 operations, uint256 gasUsed, uint256 avgGas) = apm.getUserStats(alice);
 
         assertEq(operations, 0, "No operations yet");
         assertEq(gasUsed, 0, "No gas used yet");
@@ -229,7 +216,7 @@ contract AdvancedPositionManagerTest is Test {
     /// @notice Test rescue tokens access control
     function test_RevertWhen_RescueTokens_NotOwner() public {
         address testToken = makeAddr("token");
-        
+
         vm.prank(bob);
         vm.expectRevert(AdvancedPositionManager.Unauthorized.selector);
         apm.rescueTokens(testToken, alice, 1000);
@@ -255,8 +242,7 @@ contract AdvancedPositionManagerTest is Test {
     /// @notice Test currency delta struct
     function test_CurrencyDeltaStruct() public pure {
         FlashAccountingLib.CurrencyDelta memory delta = FlashAccountingLib.CurrencyDelta({
-            currency: Currency.wrap(address(0x1234)),
-            amount: -1000
+            currency: Currency.wrap(address(0x1234)), amount: -1000
         });
 
         assertEq(Currency.unwrap(delta.currency), address(0x1234));
@@ -268,9 +254,9 @@ contract AdvancedPositionManagerTest is Test {
     /// @notice Test pool ID computation
     function test_PoolIdComputation() public view {
         PoolId poolId = ethUsdcPool.toId();
-        
+
         assertTrue(PoolId.unwrap(poolId) != bytes32(0));
-        
+
         PoolId poolId2 = ethUsdcPool.toId();
         assertEq(PoolId.unwrap(poolId), PoolId.unwrap(poolId2));
     }
@@ -304,16 +290,11 @@ contract AdvancedPositionManagerTest is Test {
     /// @notice Test rebalance requires position ownership
     function test_RevertWhen_RebalancePosition_NotOwner() public {
         // Create a position owned by alice
-        uint256 tokenId = mockPositionManager.mint(
-            alice,
-            ethUsdcPool,
-            -887220,
-            887220,
-            1000e18
-        );
+        uint256 tokenId = mockPositionManager.mint(alice, ethUsdcPool, -887_220, 887_220, 1000e18);
 
         // Bob tries to rebalance Alice's position
-        FlashAccountingLib.CurrencyDelta[] memory emptyDeltas = new FlashAccountingLib.CurrencyDelta[](0);
+        FlashAccountingLib.CurrencyDelta[] memory emptyDeltas =
+            new FlashAccountingLib.CurrencyDelta[](0);
         vm.prank(bob);
         vm.expectRevert(AdvancedPositionManager.PositionNotOwned.selector);
         apm.rebalancePosition(tokenId, -1000, 1000, emptyDeltas);
@@ -322,16 +303,11 @@ contract AdvancedPositionManagerTest is Test {
     /// @notice Test rebalance requires valid tick range
     function test_RevertWhen_RebalancePosition_InvalidTicks() public {
         // Create a position owned by alice
-        uint256 tokenId = mockPositionManager.mint(
-            alice,
-            ethUsdcPool,
-            -887220,
-            887220,
-            1000e18
-        );
+        uint256 tokenId = mockPositionManager.mint(alice, ethUsdcPool, -887_220, 887_220, 1000e18);
 
         // Alice tries invalid tick range
-        FlashAccountingLib.CurrencyDelta[] memory emptyDeltas = new FlashAccountingLib.CurrencyDelta[](0);
+        FlashAccountingLib.CurrencyDelta[] memory emptyDeltas =
+            new FlashAccountingLib.CurrencyDelta[](0);
         vm.prank(alice);
         vm.expectRevert(AdvancedPositionManager.InvalidTickRange.selector);
         apm.rebalancePosition(tokenId, 1000, -1000, emptyDeltas);
@@ -342,13 +318,7 @@ contract AdvancedPositionManagerTest is Test {
 
     /// @notice Test cross pool rebalance requires ownership
     function test_RevertWhen_RebalanceCrossPools_NotOwner() public {
-        uint256 tokenId = mockPositionManager.mint(
-            alice,
-            ethUsdcPool,
-            -887220,
-            887220,
-            1000e18
-        );
+        uint256 tokenId = mockPositionManager.mint(alice, ethUsdcPool, -887_220, 887_220, 1000e18);
 
         PoolKey memory newPool = PoolKey({
             currency0: Currency.wrap(address(0x1)),
@@ -358,7 +328,8 @@ contract AdvancedPositionManagerTest is Test {
             hooks: IHooks(address(0))
         });
 
-        FlashAccountingLib.CurrencyDelta[] memory emptyDeltas = new FlashAccountingLib.CurrencyDelta[](0);
+        FlashAccountingLib.CurrencyDelta[] memory emptyDeltas =
+            new FlashAccountingLib.CurrencyDelta[](0);
         vm.prank(bob);
         vm.expectRevert(AdvancedPositionManager.PositionNotOwned.selector);
         apm.rebalanceCrossPools(tokenId, newPool, -1000, 1000, emptyDeltas);
@@ -366,13 +337,7 @@ contract AdvancedPositionManagerTest is Test {
 
     /// @notice Test cross pool rebalance requires matching currencies
     function test_RevertWhen_RebalanceCrossPools_CurrencyMismatch() public {
-        uint256 tokenId = mockPositionManager.mint(
-            alice,
-            ethUsdcPool,
-            -887220,
-            887220,
-            1000e18
-        );
+        uint256 tokenId = mockPositionManager.mint(alice, ethUsdcPool, -887_220, 887_220, 1000e18);
 
         // Different currencies
         PoolKey memory newPool = PoolKey({
@@ -383,7 +348,8 @@ contract AdvancedPositionManagerTest is Test {
             hooks: IHooks(address(0))
         });
 
-        FlashAccountingLib.CurrencyDelta[] memory emptyDeltas = new FlashAccountingLib.CurrencyDelta[](0);
+        FlashAccountingLib.CurrencyDelta[] memory emptyDeltas =
+            new FlashAccountingLib.CurrencyDelta[](0);
         vm.prank(alice);
         vm.expectRevert(AdvancedPositionManager.CurrencyMismatch.selector);
         apm.rebalanceCrossPools(tokenId, newPool, -1000, 1000, emptyDeltas);

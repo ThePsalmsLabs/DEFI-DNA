@@ -49,17 +49,17 @@ library FlashAccountingLib {
     /// @notice Action to execute during flash accounting
     /// @dev This allows batching multiple operations atomically
     enum ActionType {
-        SWAP,              // Execute a swap
-        ADD_LIQUIDITY,     // Add liquidity to a position
-        REMOVE_LIQUIDITY,  // Remove liquidity from a position
-        COLLECT_FEES,      // Collect fees from a position
-        DONATE             // Donate to a pool
+        SWAP, // Execute a swap
+        ADD_LIQUIDITY, // Add liquidity to a position
+        REMOVE_LIQUIDITY, // Remove liquidity from a position
+        COLLECT_FEES, // Collect fees from a position
+        DONATE // Donate to a pool
     }
 
     /// @notice Encodes a flash accounting action
     struct FlashAction {
         ActionType actionType;
-        bytes data;  // Encoded action-specific data
+        bytes data; // Encoded action-specific data
     }
 
     /// @notice Result of flash accounting operations
@@ -81,10 +81,10 @@ library FlashAccountingLib {
     /// @param poolManager The Uniswap V4 PoolManager
     /// @param data Encoded callback data
     /// @return result Raw bytes returned from unlock callback
-    function executeFlashOperation(
-        IPoolManager poolManager,
-        bytes memory data
-    ) internal returns (bytes memory result) {
+    function executeFlashOperation(IPoolManager poolManager, bytes memory data)
+        internal
+        returns (bytes memory result)
+    {
         // TEACHING: unlock() is the entry point to flash accounting
         // It calls back to your contract's unlockCallback() function
         // During the callback, you can do multiple operations
@@ -100,10 +100,10 @@ library FlashAccountingLib {
     /// @param poolManager The Uniswap V4 PoolManager
     /// @param actions Array of actions to execute
     /// @return deltas The final currency deltas after all operations
-    function executeFlashBatch(
-        IPoolManager poolManager,
-        FlashAction[] memory actions
-    ) internal returns (CurrencyDelta[] memory deltas) {
+    function executeFlashBatch(IPoolManager poolManager, FlashAction[] memory actions)
+        internal
+        returns (CurrencyDelta[] memory deltas)
+    {
         // Encode actions for the unlock callback
         bytes memory data = abi.encode(actions);
 
@@ -125,10 +125,11 @@ library FlashAccountingLib {
     /// @param poolManager The Uniswap V4 PoolManager
     /// @param currency The currency to check
     /// @return delta Current delta (negative = debt, positive = credit)
-    function getCurrencyDelta(
-        IPoolManager poolManager,
-        Currency currency
-    ) internal view returns (int256 delta) {
+    function getCurrencyDelta(IPoolManager poolManager, Currency currency)
+        internal
+        view
+        returns (int256 delta)
+    {
         // Use TransientStateLibrary to get currency delta
         delta = poolManager.currencyDelta(address(this), currency);
     }
@@ -139,16 +140,16 @@ library FlashAccountingLib {
     /// @param poolManager The Uniswap V4 PoolManager
     /// @param currencies Array of currencies to check
     /// @return deltas Array of currency deltas
-    function getCurrencyDeltas(
-        IPoolManager poolManager,
-        Currency[] memory currencies
-    ) internal view returns (CurrencyDelta[] memory deltas) {
+    function getCurrencyDeltas(IPoolManager poolManager, Currency[] memory currencies)
+        internal
+        view
+        returns (CurrencyDelta[] memory deltas)
+    {
         deltas = new CurrencyDelta[](currencies.length);
 
         for (uint256 i = 0; i < currencies.length; i++) {
             deltas[i] = CurrencyDelta({
-                currency: currencies[i],
-                amount: getCurrencyDelta(poolManager, currencies[i])
+                currency: currencies[i], amount: getCurrencyDelta(poolManager, currencies[i])
             });
         }
     }
@@ -163,11 +164,7 @@ library FlashAccountingLib {
     /// @param poolManager The Uniswap V4 PoolManager
     /// @param currency The currency to settle
     /// @param delta The expected delta (for validation)
-    function settleCurrency(
-        IPoolManager poolManager,
-        Currency currency,
-        int256 delta
-    ) internal {
+    function settleCurrency(IPoolManager poolManager, Currency currency, int256 delta) internal {
         // Verify the delta matches what we expect
         int256 actualDelta = getCurrencyDelta(poolManager, currency);
         require(actualDelta == delta, "Delta mismatch");
@@ -202,10 +199,7 @@ library FlashAccountingLib {
     ///
     /// @param poolManager The Uniswap V4 PoolManager
     /// @param deltas Array of currency deltas to settle
-    function settleCurrencies(
-        IPoolManager poolManager,
-        CurrencyDelta[] memory deltas
-    ) internal {
+    function settleCurrencies(IPoolManager poolManager, CurrencyDelta[] memory deltas) internal {
         for (uint256 i = 0; i < deltas.length; i++) {
             settleCurrency(poolManager, deltas[i].currency, deltas[i].amount);
         }
@@ -219,11 +213,9 @@ library FlashAccountingLib {
     /// @param poolManager The Uniswap V4 PoolManager
     /// @param currency The currency to settle
     /// @param amount Amount to settle using claims
-    function settleWithClaims(
-        IPoolManager poolManager,
-        Currency currency,
-        uint256 amount
-    ) internal {
+    function settleWithClaims(IPoolManager poolManager, Currency currency, uint256 amount)
+        internal
+    {
         // TEACHING: burn() uses your ERC6909 claims to settle
         // Claims are like IOUs from the PoolManager
         // Token ID for claims = uint256(uint160(Currency.unwrap(currency)))
@@ -241,11 +233,7 @@ library FlashAccountingLib {
     /// @param poolManager The Uniswap V4 PoolManager
     /// @param currency The currency to take as claims
     /// @param amount Amount to take
-    function takeAsClaims(
-        IPoolManager poolManager,
-        Currency currency,
-        uint256 amount
-    ) internal {
+    function takeAsClaims(IPoolManager poolManager, Currency currency, uint256 amount) internal {
         // TEACHING: mint() gives you ERC6909 claims instead of tokens
         // The tokens stay in PoolManager, you get a claim
         uint256 claimId = currency.toId();
@@ -268,24 +256,17 @@ library FlashAccountingLib {
     /// @param removeData Data for removing liquidity
     /// @param addData Data for adding liquidity
     /// @return finalDeltas Any remaining deltas to settle
-    function closeAndReopen(
-        IPoolManager poolManager,
-        bytes memory removeData,
-        bytes memory addData
-    ) internal returns (CurrencyDelta[] memory finalDeltas) {
+    function closeAndReopen(IPoolManager poolManager, bytes memory removeData, bytes memory addData)
+        internal
+        returns (CurrencyDelta[] memory finalDeltas)
+    {
         FlashAction[] memory actions = new FlashAction[](2);
 
         // Action 1: Remove liquidity (creates positive deltas)
-        actions[0] = FlashAction({
-            actionType: ActionType.REMOVE_LIQUIDITY,
-            data: removeData
-        });
+        actions[0] = FlashAction({actionType: ActionType.REMOVE_LIQUIDITY, data: removeData});
 
         // Action 2: Add liquidity (creates negative deltas)
-        actions[1] = FlashAction({
-            actionType: ActionType.ADD_LIQUIDITY,
-            data: addData
-        });
+        actions[1] = FlashAction({actionType: ActionType.ADD_LIQUIDITY, data: addData});
 
         // Execute both atomically
         finalDeltas = executeFlashBatch(poolManager, actions);
@@ -305,17 +286,14 @@ library FlashAccountingLib {
     /// @param poolManager The Uniswap V4 PoolManager
     /// @param swaps Array of swaps to execute
     /// @return profit Profit from arbitrage
-    function arbitrageAcrossPools(
-        IPoolManager poolManager,
-        bytes[] memory swaps
-    ) internal returns (CurrencyDelta[] memory profit) {
+    function arbitrageAcrossPools(IPoolManager poolManager, bytes[] memory swaps)
+        internal
+        returns (CurrencyDelta[] memory profit)
+    {
         FlashAction[] memory actions = new FlashAction[](swaps.length);
 
         for (uint256 i = 0; i < swaps.length; i++) {
-            actions[i] = FlashAction({
-                actionType: ActionType.SWAP,
-                data: swaps[i]
-            });
+            actions[i] = FlashAction({actionType: ActionType.SWAP, data: swaps[i]});
         }
 
         // Execute all swaps atomically
@@ -331,29 +309,28 @@ library FlashAccountingLib {
     ///
     /// @param deltas The deltas to validate
     /// @param minExpected Minimum expected amounts per currency
-    function validateDeltas(
-        CurrencyDelta[] memory deltas,
-        int256[] memory minExpected
-    ) internal pure {
+    function validateDeltas(CurrencyDelta[] memory deltas, int256[] memory minExpected)
+        internal
+        pure
+    {
         require(deltas.length == minExpected.length, "Length mismatch");
 
         for (uint256 i = 0; i < deltas.length; i++) {
-            require(
-                deltas[i].amount >= minExpected[i],
-                "Delta below minimum"
-            );
+            require(deltas[i].amount >= minExpected[i], "Delta below minimum");
         }
     }
 
     // ============ Helper Functions ============
 
     /// @notice Calculate net deltas for multi-step operations
-    /// @dev Groups deltas by currency and sums amounts, returning unique currencies with net amounts
-    /// @param deltas Array of currency deltas to net
+    /// @dev Groups deltas by currency and sums amounts, returning unique currencies with net
+    /// amounts @param deltas Array of currency deltas to net
     /// @return netDeltas Array of unique currencies with summed amounts
-    function calculateNetDeltas(
-        CurrencyDelta[] memory deltas
-    ) internal pure returns (CurrencyDelta[] memory netDeltas) {
+    function calculateNetDeltas(CurrencyDelta[] memory deltas)
+        internal
+        pure
+        returns (CurrencyDelta[] memory netDeltas)
+    {
         if (deltas.length == 0) {
             return new CurrencyDelta[](0);
         }
@@ -364,7 +341,10 @@ library FlashAccountingLib {
         for (uint256 i = 0; i < deltas.length; i++) {
             sorted[i] = deltas[i];
             uint256 j = i;
-            while (j > 0 && Currency.unwrap(sorted[j - 1].currency) > Currency.unwrap(sorted[j].currency)) {
+            while (
+                j > 0
+                    && Currency.unwrap(sorted[j - 1].currency) > Currency.unwrap(sorted[j].currency)
+            ) {
                 CurrencyDelta memory temp = sorted[j];
                 sorted[j] = sorted[j - 1];
                 sorted[j - 1] = temp;
@@ -392,10 +372,7 @@ library FlashAccountingLib {
                 currentSum += sorted[i].amount;
             } else {
                 // New currency, save previous and start new
-                netDeltas[netIndex] = CurrencyDelta({
-                    currency: currentCurrency,
-                    amount: currentSum
-                });
+                netDeltas[netIndex] = CurrencyDelta({currency: currentCurrency, amount: currentSum});
                 netIndex++;
                 currentCurrency = sorted[i].currency;
                 currentSum = sorted[i].amount;
@@ -403,17 +380,12 @@ library FlashAccountingLib {
         }
 
         // Add the last currency
-        netDeltas[netIndex] = CurrencyDelta({
-            currency: currentCurrency,
-            amount: currentSum
-        });
+        netDeltas[netIndex] = CurrencyDelta({currency: currentCurrency, amount: currentSum});
     }
 
     /// @notice Check if all deltas are settled (= 0)
     /// @dev TEACHING: PoolManager requires all deltas = 0 before unlock ends
-    function areAllDeltasSettled(
-        CurrencyDelta[] memory deltas
-    ) internal pure returns (bool) {
+    function areAllDeltasSettled(CurrencyDelta[] memory deltas) internal pure returns (bool) {
         for (uint256 i = 0; i < deltas.length; i++) {
             if (deltas[i].amount != 0) {
                 return false;
