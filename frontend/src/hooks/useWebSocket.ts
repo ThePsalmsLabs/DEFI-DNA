@@ -73,19 +73,19 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
               break;
 
             case 'leaderboard_update':
-              console.log('🔄 Leaderboard update received');
+              console.log('[WebSocket] Leaderboard update received');
               queryClient.invalidateQueries({ queryKey: ['leaderboard'] });
               onUpdate?.({ type: 'leaderboard_update', data: message.data });
               break;
 
             case 'ranking_changes':
-              console.log('📊 Ranking changes received');
+              console.log('[WebSocket] Ranking changes received');
               queryClient.invalidateQueries({ queryKey: ['leaderboard'] });
               onUpdate?.({ type: 'ranking_changes', data: message.data });
               break;
 
             case 'new_leader':
-              console.log('👑 New leader announced');
+              console.log('[WebSocket] New leader announced');
               queryClient.invalidateQueries({ queryKey: ['leaderboard'] });
               onUpdate?.({ type: 'new_leader', data: message.data });
               break;
