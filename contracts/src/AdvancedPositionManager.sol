@@ -7,7 +7,10 @@ import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 import {PoolId, PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {Currency, CurrencyLibrary} from "@uniswap/v4-core/src/types/Currency.sol";
 import {BalanceDelta} from "@uniswap/v4-core/src/types/BalanceDelta.sol";
-import {PositionInfo, PositionInfoLibrary} from "@uniswap/v4-periphery/src/libraries/PositionInfoLibrary.sol";
+import {
+    PositionInfo,
+    PositionInfoLibrary
+} from "@uniswap/v4-periphery/src/libraries/PositionInfoLibrary.sol";
 import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
 import {FlashAccountingLib} from "./libraries/FlashAccountingLib.sol";
 import {Actions} from "@uniswap/v4-periphery/src/libraries/Actions.sol";
@@ -17,10 +20,15 @@ import {CalldataDecoder} from "@uniswap/v4-periphery/src/libraries/CalldataDecod
 interface IPositionManagerMinimal {
     function ownerOf(uint256 tokenId) external view returns (address);
     function getPositionLiquidity(uint256 tokenId) external view returns (uint128);
-    function getPoolAndPositionInfo(uint256 tokenId) external view returns (PoolKey memory, PositionInfo);
+    function getPoolAndPositionInfo(uint256 tokenId)
+        external
+        view
+        returns (PoolKey memory, PositionInfo);
     function nextTokenId() external view returns (uint256);
     function modifyLiquidities(bytes calldata unlockData, uint256 deadline) external payable;
-    function modifyLiquiditiesWithoutUnlock(bytes calldata actions, bytes[] calldata params) external payable;
+    function modifyLiquiditiesWithoutUnlock(bytes calldata actions, bytes[] calldata params)
+        external
+        payable;
 }
 
 /// @title AdvancedPositionManager
@@ -73,10 +81,7 @@ contract AdvancedPositionManager is IUnlockCallback {
     );
 
     event ArbitrageExecuted(
-        address indexed executor,
-        PoolId[] poolIds,
-        int256 profit,
-        uint256 gasUsed
+        address indexed executor, PoolId[] poolIds, int256 profit, uint256 gasUsed
     );
 
     // ============ State Variables ============
@@ -132,7 +137,7 @@ contract AdvancedPositionManager is IUnlockCallback {
 
         // Decode operation type
         uint256 operationType = abi.decode(data, (uint256));
-        
+
         if (operationType == 1) {
             // Rebalance operation
             return _handleRebalance(data);
@@ -154,8 +159,8 @@ contract AdvancedPositionManager is IUnlockCallback {
     /// @param tokenId The position to rebalance
     /// @param newTickLower New lower tick
     /// @param newTickUpper New upper tick
-    /// @param minExpectedDeltas Minimum expected deltas for slippage protection (can be empty for no protection)
-    /// @return newTokenId The new position token ID
+    /// @param minExpectedDeltas Minimum expected deltas for slippage protection (can be empty for
+    /// no protection) @return newTokenId The new position token ID
     function rebalancePosition(
         uint256 tokenId,
         int24 newTickLower,
@@ -173,7 +178,7 @@ contract AdvancedPositionManager is IUnlockCallback {
         (PoolKey memory key, PositionInfo info) = positionManager.getPoolAndPositionInfo(tokenId);
         PoolId poolId = key.toId();
         uint128 currentLiquidity = positionManager.getPositionLiquidity(tokenId);
-        
+
         if (currentLiquidity == 0) revert InsufficientLiquidity();
 
         // Encode operation data for unlock callback
@@ -225,12 +230,13 @@ contract AdvancedPositionManager is IUnlockCallback {
 
         uint256 startGas = gasleft();
 
-        (PoolKey memory oldKey, PositionInfo info) = positionManager.getPoolAndPositionInfo(oldTokenId);
+        (PoolKey memory oldKey, PositionInfo info) =
+            positionManager.getPoolAndPositionInfo(oldTokenId);
 
         // Verify currencies match
         if (
-            Currency.unwrap(oldKey.currency0) != Currency.unwrap(newPoolKey.currency0) ||
-            Currency.unwrap(oldKey.currency1) != Currency.unwrap(newPoolKey.currency1)
+            Currency.unwrap(oldKey.currency0) != Currency.unwrap(newPoolKey.currency0)
+                || Currency.unwrap(oldKey.currency1) != Currency.unwrap(newPoolKey.currency1)
         ) {
             revert CurrencyMismatch();
         }
@@ -339,15 +345,17 @@ contract AdvancedPositionManager is IUnlockCallback {
 
     /// @notice Handle rebalance operation in unlock callback
     function _handleRebalance(bytes calldata data) internal returns (bytes memory) {
-        (
-            , // operationType
+        (, // operationType
             uint256 tokenId,
             PoolKey memory key,
             int24 newTickLower,
             int24 newTickUpper,
             uint128 currentLiquidity,
             FlashAccountingLib.CurrencyDelta[] memory minExpectedDeltas
-        ) = abi.decode(data, (uint256, uint256, PoolKey, int24, int24, uint128, FlashAccountingLib.CurrencyDelta[]));
+        ) = abi.decode(
+            data,
+            (uint256, uint256, PoolKey, int24, int24, uint128, FlashAccountingLib.CurrencyDelta[])
+        );
 
         // Get current position liquidity
         uint128 positionLiquidity = positionManager.getPositionLiquidity(tokenId);
@@ -388,7 +396,8 @@ contract AdvancedPositionManager is IUnlockCallback {
         Currency[] memory currencies = new Currency[](2);
         currencies[0] = key.currency0;
         currencies[1] = key.currency1;
-        FlashAccountingLib.CurrencyDelta[] memory finalDeltas = FlashAccountingLib.getCurrencyDeltas(poolManager, currencies);
+        FlashAccountingLib.CurrencyDelta[] memory finalDeltas =
+            FlashAccountingLib.getCurrencyDeltas(poolManager, currencies);
 
         // Validate slippage if provided
         if (minExpectedDeltas.length > 0) {
@@ -404,8 +413,7 @@ contract AdvancedPositionManager is IUnlockCallback {
 
     /// @notice Handle cross-pool rebalance operation
     function _handleCrossPoolRebalance(bytes calldata data) internal returns (bytes memory) {
-        (
-            , // operationType
+        (, // operationType
             uint256 oldTokenId,
             PoolKey memory oldKey,
             PoolKey memory newPoolKey,
@@ -413,7 +421,19 @@ contract AdvancedPositionManager is IUnlockCallback {
             int24 newTickUpper,
             uint128 currentLiquidity,
             FlashAccountingLib.CurrencyDelta[] memory minExpectedDeltas
-        ) = abi.decode(data, (uint256, uint256, PoolKey, PoolKey, int24, int24, uint128, FlashAccountingLib.CurrencyDelta[]));
+        ) = abi.decode(
+            data,
+            (
+                uint256,
+                uint256,
+                PoolKey,
+                PoolKey,
+                int24,
+                int24,
+                uint128,
+                FlashAccountingLib.CurrencyDelta[]
+            )
+        );
 
         uint128 positionLiquidity = positionManager.getPositionLiquidity(oldTokenId);
         if (positionLiquidity == 0) revert InsufficientLiquidity();
@@ -425,11 +445,7 @@ contract AdvancedPositionManager is IUnlockCallback {
         // Action 1: Decrease liquidity from old pool
         actions[0] = bytes1(uint8(Actions.DECREASE_LIQUIDITY));
         params[0] = abi.encode(
-            oldTokenId,
-            int256(uint256(positionLiquidity)),
-            type(uint128).max,
-            type(uint128).max,
-            ""
+            oldTokenId, int256(uint256(positionLiquidity)), type(uint128).max, type(uint128).max, ""
         );
 
         // Action 2: Mint position in new pool
@@ -452,7 +468,8 @@ contract AdvancedPositionManager is IUnlockCallback {
         Currency[] memory currencies = new Currency[](2);
         currencies[0] = newPoolKey.currency0;
         currencies[1] = newPoolKey.currency1;
-        FlashAccountingLib.CurrencyDelta[] memory finalDeltas = FlashAccountingLib.getCurrencyDeltas(poolManager, currencies);
+        FlashAccountingLib.CurrencyDelta[] memory finalDeltas =
+            FlashAccountingLib.getCurrencyDeltas(poolManager, currencies);
 
         if (minExpectedDeltas.length > 0) {
             FlashAccountingLib.validateDeltas(finalDeltas, _deltasToIntArray(minExpectedDeltas));
@@ -468,8 +485,7 @@ contract AdvancedPositionManager is IUnlockCallback {
     /// @param data Encoded arbitrage parameters (poolKeys, swapDatas, minProfit)
     /// @return result Encoded profit deltas
     function _handleArbitrage(bytes calldata data) internal returns (bytes memory) {
-        (
-            , // operationType
+        (, // operationType
             PoolKey[] memory poolKeys,
             bytes[] memory swapDatas,
             FlashAccountingLib.CurrencyDelta[] memory minProfit
@@ -478,11 +494,11 @@ contract AdvancedPositionManager is IUnlockCallback {
         // Execute swaps directly on poolManager (we're already in unlock callback)
         // swapDatas should contain encoded SwapParams for each pool
         // For each swap, we call poolManager.swap() which updates deltas in transient storage
-        
+
         // Collect all unique currencies involved
         Currency[] memory allCurrencies = new Currency[](poolKeys.length * 2);
         uint256 currencyCount = 0;
-        
+
         for (uint256 i = 0; i < poolKeys.length; i++) {
             // Add currencies if not already in list
             bool found0 = false;
@@ -508,23 +524,24 @@ contract AdvancedPositionManager is IUnlockCallback {
         // For now, we assume swapDatas contains the necessary swap parameters
         // The actual swap execution would be:
         // for (uint256 i = 0; i < poolKeys.length; i++) {
-        //     IPoolManager.SwapParams memory params = abi.decode(swapDatas[i], (IPoolManager.SwapParams));
-        //     poolManager.swap(poolKeys[i], params, "");
+        //     IPoolManager.SwapParams memory params = abi.decode(swapDatas[i],
+        // (IPoolManager.SwapParams)); poolManager.swap(poolKeys[i], params, "");
         // }
-        
+
         // Get final deltas for all currencies
         Currency[] memory finalCurrencies = new Currency[](currencyCount);
         for (uint256 i = 0; i < currencyCount; i++) {
             finalCurrencies[i] = allCurrencies[i];
         }
-        
-        FlashAccountingLib.CurrencyDelta[] memory profit = FlashAccountingLib.getCurrencyDeltas(poolManager, finalCurrencies);
-        
+
+        FlashAccountingLib.CurrencyDelta[] memory profit =
+            FlashAccountingLib.getCurrencyDeltas(poolManager, finalCurrencies);
+
         // Validate minimum profit if provided
         if (minProfit.length > 0) {
             FlashAccountingLib.validateDeltas(profit, _deltasToIntArray(minProfit));
         }
-        
+
         return abi.encode(profit);
     }
 
@@ -541,7 +558,11 @@ contract AdvancedPositionManager is IUnlockCallback {
     }
 
     /// @notice Helper to convert CurrencyDelta[] to int256[]
-    function _deltasToIntArray(FlashAccountingLib.CurrencyDelta[] memory deltas) internal pure returns (int256[] memory) {
+    function _deltasToIntArray(FlashAccountingLib.CurrencyDelta[] memory deltas)
+        internal
+        pure
+        returns (int256[] memory)
+    {
         int256[] memory amounts = new int256[](deltas.length);
         for (uint256 i = 0; i < deltas.length; i++) {
             amounts[i] = deltas[i].amount;
@@ -557,11 +578,11 @@ contract AdvancedPositionManager is IUnlockCallback {
     }
 
     /// @notice Get user's operation statistics
-    function getUserStats(address user) external view returns (
-        uint256 operations,
-        uint256 gasUsed,
-        uint256 avgGasPerOp
-    ) {
+    function getUserStats(address user)
+        external
+        view
+        returns (uint256 operations, uint256 gasUsed, uint256 avgGasPerOp)
+    {
         operations = successfulOperations[user];
         gasUsed = totalGasUsed[user];
         avgGasPerOp = operations > 0 ? gasUsed / operations : 0;
@@ -572,10 +593,9 @@ contract AdvancedPositionManager is IUnlockCallback {
     /// @notice Rescue tokens sent by mistake
     function rescueTokens(address token, address to, uint256 amount) external {
         if (msg.sender != owner) revert Unauthorized();
-        
-        (bool success, ) = token.call(
-            abi.encodeWithSignature("transfer(address,uint256)", to, amount)
-        );
+
+        (bool success,) =
+            token.call(abi.encodeWithSignature("transfer(address,uint256)", to, amount));
         if (!success) revert InvalidPosition();
     }
 }
