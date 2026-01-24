@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Dna, Trophy, BarChart3, Clock, Menu, X } from 'lucide-react';
+import { Dna, Trophy, BarChart3, Clock, Menu, X, Search } from 'lucide-react';
 import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ConnectButton } from '@/components/wallet/ConnectButton';
@@ -11,6 +11,7 @@ import { clsx } from 'clsx';
 const navigation = [
   { name: 'Home', href: '/', icon: Dna },
   { name: 'Leaderboard', href: '/leaderboard', icon: Trophy },
+  { name: 'Search', href: '/search', icon: Search },
   { name: 'Analytics', href: '/analytics', icon: BarChart3 },
 ];
 
