@@ -2,22 +2,22 @@
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { WagmiProvider, createConfig, http } from 'wagmi';
-import { mainnet, sepolia } from 'wagmi/chains';
+import { base, baseSepolia } from 'viem/chains';
 import { injected, walletConnect } from 'wagmi/connectors';
 import { useState } from 'react';
 
-// Wagmi config
+// Wagmi config - Base Mainnet and Base Sepolia
 const config = createConfig({
-  chains: [mainnet, sepolia],
+  chains: [base, baseSepolia],
   connectors: [
     injected(),
     walletConnect({
-      projectId: process.env.NEXT_PUBLIC_WC_PROJECT_ID || 'demo',
+      projectId: process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID || 'demo',
     }),
   ],
   transports: {
-    [mainnet.id]: http(),
-    [sepolia.id]: http(),
+    [base.id]: http(),
+    [baseSepolia.id]: http(),
   },
 });
 
