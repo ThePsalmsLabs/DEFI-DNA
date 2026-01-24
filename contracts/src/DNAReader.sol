@@ -5,7 +5,10 @@ import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import {PoolId, PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
-import {PositionInfo, PositionInfoLibrary} from "@uniswap/v4-periphery/src/libraries/PositionInfoLibrary.sol";
+import {
+    PositionInfo,
+    PositionInfoLibrary
+} from "@uniswap/v4-periphery/src/libraries/PositionInfoLibrary.sol";
 import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
 import {FullMath} from "@uniswap/v4-core/src/libraries/FullMath.sol";
 import {FixedPoint96} from "@uniswap/v4-core/src/libraries/FixedPoint96.sol";
@@ -14,7 +17,10 @@ import {FixedPoint96} from "@uniswap/v4-core/src/libraries/FixedPoint96.sol";
 interface IPositionManagerMinimal {
     function ownerOf(uint256 tokenId) external view returns (address);
     function getPositionLiquidity(uint256 tokenId) external view returns (uint128);
-    function getPoolAndPositionInfo(uint256 tokenId) external view returns (PoolKey memory, PositionInfo);
+    function getPoolAndPositionInfo(uint256 tokenId)
+        external
+        view
+        returns (PoolKey memory, PositionInfo);
 }
 
 /// @notice Minimal interface for StateView functions we need
@@ -79,11 +85,7 @@ contract DNAReader {
 
     // ============ Constructor ============
 
-    constructor(
-        address _poolManager,
-        address _stateView,
-        address _positionManager
-    ) {
+    constructor(address _poolManager, address _stateView, address _positionManager) {
         poolManager = IPoolManager(_poolManager);
         stateView = IStateViewMinimal(_stateView);
         positionManager = IPositionManagerMinimal(_positionManager);
@@ -96,48 +98,40 @@ contract DNAReader {
     /// @return snapshot The pool snapshot
     function getPoolSnapshot(PoolId poolId) external view returns (PoolSnapshot memory snapshot) {
         snapshot.poolId = PoolId.unwrap(poolId);
-        
-        (
-            snapshot.sqrtPriceX96,
-            snapshot.tick,
-            snapshot.protocolFee,
-            snapshot.lpFee
-        ) = stateView.getSlot0(poolId);
-        
+
+        (snapshot.sqrtPriceX96, snapshot.tick, snapshot.protocolFee, snapshot.lpFee) =
+            stateView.getSlot0(poolId);
+
         snapshot.liquidity = stateView.getLiquidity(poolId);
-        
-        (
-            snapshot.feeGrowthGlobal0,
-            snapshot.feeGrowthGlobal1
-        ) = stateView.getFeeGrowthGlobals(poolId);
+
+        (snapshot.feeGrowthGlobal0, snapshot.feeGrowthGlobal1) =
+            stateView.getFeeGrowthGlobals(poolId);
     }
 
     /// @notice Get snapshots of multiple pools
     /// @param poolIds Array of pool IDs
     /// @return snapshots Array of pool snapshots
-    function getPoolSnapshots(PoolId[] calldata poolIds) 
-        external 
-        view 
-        returns (PoolSnapshot[] memory snapshots) 
+    function getPoolSnapshots(PoolId[] calldata poolIds)
+        external
+        view
+        returns (PoolSnapshot[] memory snapshots)
     {
         snapshots = new PoolSnapshot[](poolIds.length);
-        
+
         for (uint256 i = 0; i < poolIds.length; i++) {
             snapshots[i].poolId = PoolId.unwrap(poolIds[i]);
-            
+
             (
                 snapshots[i].sqrtPriceX96,
                 snapshots[i].tick,
                 snapshots[i].protocolFee,
                 snapshots[i].lpFee
             ) = stateView.getSlot0(poolIds[i]);
-            
+
             snapshots[i].liquidity = stateView.getLiquidity(poolIds[i]);
-            
-            (
-                snapshots[i].feeGrowthGlobal0,
-                snapshots[i].feeGrowthGlobal1
-            ) = stateView.getFeeGrowthGlobals(poolIds[i]);
+
+            (snapshots[i].feeGrowthGlobal0, snapshots[i].feeGrowthGlobal1) =
+                stateView.getFeeGrowthGlobals(poolIds[i]);
         }
     }
 
@@ -145,20 +139,20 @@ contract DNAReader {
     /// @param poolId The pool ID
     /// @return tick The current tick
     function getCurrentTick(PoolId poolId) external view returns (int24 tick) {
-        (, tick, , ) = stateView.getSlot0(poolId);
+        (, tick,,) = stateView.getSlot0(poolId);
     }
 
     /// @notice Get current ticks for multiple pools
     /// @param poolIds Array of pool IDs
     /// @return ticks Array of current ticks
-    function getCurrentTicks(PoolId[] calldata poolIds) 
-        external 
-        view 
-        returns (int24[] memory ticks) 
+    function getCurrentTicks(PoolId[] calldata poolIds)
+        external
+        view
+        returns (int24[] memory ticks)
     {
         ticks = new int24[](poolIds.length);
         for (uint256 i = 0; i < poolIds.length; i++) {
-            (, ticks[i], , ) = stateView.getSlot0(poolIds[i]);
+            (, ticks[i],,) = stateView.getSlot0(poolIds[i]);
         }
     }
 
@@ -167,33 +161,33 @@ contract DNAReader {
     /// @notice Get position snapshot with calculated fees
     /// @param tokenId The token ID
     /// @return snapshot The position snapshot
-    function getPositionSnapshot(uint256 tokenId) 
-        external 
-        view 
-        returns (PositionSnapshot memory snapshot) 
+    function getPositionSnapshot(uint256 tokenId)
+        external
+        view
+        returns (PositionSnapshot memory snapshot)
     {
         snapshot.tokenId = tokenId;
-        
+
         // Get owner
         try positionManager.ownerOf(tokenId) returns (address owner) {
             snapshot.owner = owner;
         } catch {
             return snapshot;
         }
-        
+
         // Get pool and position info
         (PoolKey memory key, PositionInfo info) = positionManager.getPoolAndPositionInfo(tokenId);
         snapshot.poolId = PoolId.unwrap(key.toId());
-        
+
         // Get tick range from position info
         snapshot.tickLower = info.tickLower();
         snapshot.tickUpper = info.tickUpper();
-        
+
         // Get liquidity
         snapshot.liquidity = positionManager.getPositionLiquidity(tokenId);
-        
+
         // Get current tick to check if in range
-        (, int24 currentTick, , ) = stateView.getSlot0(key.toId());
+        (, int24 currentTick,,) = stateView.getSlot0(key.toId());
         snapshot.isInRange = currentTick >= snapshot.tickLower && currentTick < snapshot.tickUpper;
     }
 
@@ -206,22 +200,23 @@ contract DNAReader {
         returns (PositionSnapshot[] memory snapshots)
     {
         snapshots = new PositionSnapshot[](tokenIds.length);
-        
+
         for (uint256 i = 0; i < tokenIds.length; i++) {
             snapshots[i].tokenId = tokenIds[i];
-            
+
             try positionManager.ownerOf(tokenIds[i]) returns (address owner) {
                 snapshots[i].owner = owner;
-                
-                (PoolKey memory key, PositionInfo info) = positionManager.getPoolAndPositionInfo(tokenIds[i]);
+
+                (PoolKey memory key, PositionInfo info) =
+                    positionManager.getPoolAndPositionInfo(tokenIds[i]);
                 snapshots[i].poolId = PoolId.unwrap(key.toId());
                 snapshots[i].tickLower = info.tickLower();
                 snapshots[i].tickUpper = info.tickUpper();
                 snapshots[i].liquidity = positionManager.getPositionLiquidity(tokenIds[i]);
-                
-                (, int24 currentTick, , ) = stateView.getSlot0(key.toId());
-                snapshots[i].isInRange = currentTick >= snapshots[i].tickLower && 
-                                         currentTick < snapshots[i].tickUpper;
+
+                (, int24 currentTick,,) = stateView.getSlot0(key.toId());
+                snapshots[i].isInRange =
+                    currentTick >= snapshots[i].tickLower && currentTick < snapshots[i].tickUpper;
             } catch {
                 continue;
             }
@@ -237,15 +232,16 @@ contract DNAReader {
         returns (bool[] memory inRange)
     {
         inRange = new bool[](tokenIds.length);
-        
+
         for (uint256 i = 0; i < tokenIds.length; i++) {
             try positionManager.ownerOf(tokenIds[i]) returns (address) {
-                (PoolKey memory key, PositionInfo info) = positionManager.getPoolAndPositionInfo(tokenIds[i]);
-                (, int24 currentTick, , ) = stateView.getSlot0(key.toId());
-                
+                (PoolKey memory key, PositionInfo info) =
+                    positionManager.getPoolAndPositionInfo(tokenIds[i]);
+                (, int24 currentTick,,) = stateView.getSlot0(key.toId());
+
                 int24 tickLower = info.tickLower();
                 int24 tickUpper = info.tickUpper();
-                
+
                 inRange[i] = currentTick >= tickLower && currentTick < tickUpper;
             } catch {
                 inRange[i] = false;
@@ -261,31 +257,27 @@ contract DNAReader {
     /// @param decimals0 Decimals of token0
     /// @param decimals1 Decimals of token1
     /// @return price The price (token1 per token0) scaled by 1e18
-    function sqrtPriceToPrice(
-        uint160 sqrtPriceX96,
-        uint8 decimals0,
-        uint8 decimals1
-    ) external pure returns (uint256 price) {
+    function sqrtPriceToPrice(uint160 sqrtPriceX96, uint8 decimals0, uint8 decimals1)
+        external
+        pure
+        returns (uint256 price)
+    {
         // Price formula: (sqrtPriceX96 / 2^96)^2 * (10^decimals0 / 10^decimals1) * 1e18
         // = (sqrtPriceX96^2 * 10^decimals0 * 1e18) / (2^192 * 10^decimals1)
         // To avoid overflow, we use FullMath.mulDiv for the entire calculation
-        
+
         uint256 sqrtPrice = uint256(sqrtPriceX96);
         uint256 numerator = sqrtPrice * sqrtPrice; // sqrtPriceX96^2
-        
+
         // Calculate decimals multiplier
         uint256 decimalsMultiplier = 10 ** decimals0;
         uint256 decimalsDivisor = 10 ** decimals1;
-        
+
         // Denominator = 2^192 * 10^decimals1
         uint256 denominator = (1 << 192) * decimalsDivisor;
-        
+
         // Use FullMath to safely calculate: (numerator * 1e18 * decimalsMultiplier) / denominator
-        price = FullMath.mulDiv(
-            numerator,
-            1e18 * decimalsMultiplier,
-            denominator
-        );
+        price = FullMath.mulDiv(numerator, 1e18 * decimalsMultiplier, denominator);
     }
 
     /// @notice Convert tick to sqrtPriceX96
@@ -293,11 +285,11 @@ contract DNAReader {
     /// @return sqrtPriceX96 The sqrt price in Q96 format
     function tickToSqrtPriceX96(int24 tick) external pure returns (uint160 sqrtPriceX96) {
         uint256 absTick = tick < 0 ? uint256(uint24(-tick)) : uint256(uint24(tick));
-        
-        uint256 ratio = absTick & 0x1 != 0 
-            ? 0xfffcb933bd6fad37aa2d162d1a594001 
+
+        uint256 ratio = absTick & 0x1 != 0
+            ? 0xfffcb933bd6fad37aa2d162d1a594001
             : 0x100000000000000000000000000000000;
-            
+
         if (absTick & 0x2 != 0) ratio = (ratio * 0xfff97272373d413259a46990580e213a) >> 128;
         if (absTick & 0x4 != 0) ratio = (ratio * 0xfff2e50f5f656932ef12357cf3c7fdcc) >> 128;
         if (absTick & 0x8 != 0) ratio = (ratio * 0xffe5caca7e10e4e61c3624eaa0941cd0) >> 128;
@@ -328,11 +320,7 @@ contract DNAReader {
     /// @notice Execute multiple read calls in a single transaction
     /// @param data Array of encoded function calls
     /// @return results Array of return data
-    function multicall(bytes[] calldata data) 
-        external 
-        view 
-        returns (bytes[] memory results) 
-    {
+    function multicall(bytes[] calldata data) external view returns (bytes[] memory results) {
         results = new bytes[](data.length);
         for (uint256 i = 0; i < data.length; i++) {
             (bool success, bytes memory result) = address(this).staticcall(data[i]);
