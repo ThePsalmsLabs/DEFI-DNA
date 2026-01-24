@@ -3,7 +3,7 @@
 import { motion } from 'framer-motion';
 import Link from 'next/link';
 import { useAccount } from 'wagmi';
-import { ArrowRight, Dna, Trophy, TrendingUp, Users } from 'lucide-react';
+import { ArrowRight, Dna, Trophy, TrendingUp, Users, Search, Waves, Star, TreePine, Sprout, Seedling } from 'lucide-react';
 import { ConnectButton } from '@/components/wallet/ConnectButton';
 
 export default function HomePage() {
@@ -46,28 +46,44 @@ export default function HomePage() {
             </p>
 
             {/* CTA Buttons */}
-            <div className="flex flex-col sm:flex-row gap-4 justify-center items-center">
-              {isConnected ? (
+            <div className="flex flex-col items-center gap-4 w-full max-w-2xl mx-auto">
+              {/* Primary CTA */}
+              <div className="w-full">
+                {isConnected ? (
+                  <Link
+                    href={`/profile/${address}`}
+                    className="block w-full text-center px-8 py-4 bg-gradient-to-r from-primary-500 to-purple-500 text-white font-semibold rounded-xl hover:opacity-90 transition shadow-glow"
+                  >
+                    <div className="flex items-center justify-center gap-2">
+                      View My DNA
+                      <ArrowRight className="w-5 h-5" />
+                    </div>
+                  </Link>
+                ) : (
+                  <div className="w-full">
+                    <ConnectButton />
+                  </div>
+                )}
+              </div>
+
+              {/* Secondary Actions */}
+              <div className="flex flex-col sm:flex-row gap-3 w-full">
                 <Link
-                  href={`/profile/${address}`}
-                  className="inline-flex items-center justify-center gap-2 px-8 py-4 bg-gradient-to-r from-primary-500 to-purple-500 text-white font-semibold rounded-xl hover:opacity-90 transition shadow-glow min-w-[200px]"
+                  href="/leaderboard"
+                  className="flex-1 inline-flex items-center justify-center gap-2 px-6 py-3 bg-gray-800/50 text-white font-medium rounded-xl hover:bg-gray-800 transition border border-gray-700/50 hover:border-gray-600"
                 >
-                  View My DNA
-                  <ArrowRight className="w-5 h-5" />
+                  <Trophy className="w-4 h-4" />
+                  Leaderboard
                 </Link>
-              ) : (
-                <div className="min-w-[200px]">
-                  <ConnectButton />
-                </div>
-              )}
-              
-              <Link
-                href="/leaderboard"
-                className="inline-flex items-center justify-center gap-2 px-8 py-4 bg-gray-800 text-white font-semibold rounded-xl hover:bg-gray-700 transition border border-gray-700 min-w-[200px]"
-              >
-                <Trophy className="w-5 h-5" />
-                Leaderboard
-              </Link>
+
+                <Link
+                  href="/search"
+                  className="flex-1 inline-flex items-center justify-center gap-2 px-6 py-3 bg-gray-800/50 text-white font-medium rounded-xl hover:bg-gray-800 transition border border-gray-700/50 hover:border-gray-600"
+                >
+                  <Search className="w-4 h-4" />
+                  Search Wallet
+                </Link>
+              </div>
             </div>
           </motion.div>
         </div>
@@ -177,7 +193,7 @@ export default function HomePage() {
                 transition={{ duration: 0.4, delay: index * 0.1 }}
                 className={`px-6 py-4 rounded-xl border ${tier.class} flex items-center gap-3`}
               >
-                <span className="text-2xl">{tier.emoji}</span>
+                <tier.icon className="w-6 h-6" />
                 <div>
                   <div className="font-semibold">{tier.name}</div>
                   <div className="text-sm opacity-75">{tier.range}</div>
@@ -254,10 +270,10 @@ const scoreComponents = [
 ];
 
 const tiers = [
-  { name: 'Novice', range: '0-19', emoji: '🌱', class: 'tier-novice' },
-  { name: 'Beginner', range: '20-39', emoji: '🌿', class: 'tier-beginner' },
-  { name: 'Intermediate', range: '40-59', emoji: '🌳', class: 'tier-intermediate' },
-  { name: 'Expert', range: '60-79', emoji: '⭐', class: 'tier-expert' },
-  { name: 'Whale', range: '80-100', emoji: '🐋', class: 'tier-whale' },
+  { name: 'Novice', range: '0-19', icon: Seedling, class: 'tier-novice' },
+  { name: 'Beginner', range: '20-39', icon: Sprout, class: 'tier-beginner' },
+  { name: 'Intermediate', range: '40-59', icon: TreePine, class: 'tier-intermediate' },
+  { name: 'Expert', range: '60-79', icon: Star, class: 'tier-expert' },
+  { name: 'Whale', range: '80-100', icon: Waves, class: 'tier-whale' },
 ];
 
