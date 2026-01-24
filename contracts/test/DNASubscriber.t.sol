@@ -8,7 +8,10 @@ import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 import {PoolId, PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {Currency, CurrencyLibrary} from "@uniswap/v4-core/src/types/Currency.sol";
 import {BalanceDelta, toBalanceDelta} from "@uniswap/v4-core/src/types/BalanceDelta.sol";
-import {PositionInfo, PositionInfoLibrary} from "@uniswap/v4-periphery/src/libraries/PositionInfoLibrary.sol";
+import {
+    PositionInfo,
+    PositionInfoLibrary
+} from "@uniswap/v4-periphery/src/libraries/PositionInfoLibrary.sol";
 import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
 
 /// @title MockPositionManager
@@ -79,15 +82,20 @@ contract MockPositionManager {
         DNASubscriber(subscriber).notifyUnsubscribe(tokenId);
     }
 
-    function modifyLiquidity(uint256 tokenId, int256 liquidityChange, int128 feesAccrued0, int128 feesAccrued1) external {
+    function modifyLiquidity(
+        uint256 tokenId,
+        int256 liquidityChange,
+        int128 feesAccrued0,
+        int128 feesAccrued1
+    ) external {
         require(subscriber != address(0), "No subscriber set");
-        
+
         if (liquidityChange > 0) {
             positions[tokenId].liquidity += uint128(uint256(liquidityChange));
         } else if (liquidityChange < 0) {
             positions[tokenId].liquidity -= uint128(uint256(-liquidityChange));
         }
-        
+
         BalanceDelta feesAccrued = toBalanceDelta(feesAccrued0, feesAccrued1);
         DNASubscriber(subscriber).notifyModifyLiquidity(tokenId, liquidityChange, feesAccrued);
     }
@@ -95,18 +103,13 @@ contract MockPositionManager {
     function burn(uint256 tokenId) external {
         require(subscriber != address(0), "No subscriber set");
         Position memory pos = positions[tokenId];
-        
-        PositionInfo info = PositionInfoLibrary.initialize(pos.poolKey, pos.tickLower, pos.tickUpper);
+
+        PositionInfo info =
+            PositionInfoLibrary.initialize(pos.poolKey, pos.tickLower, pos.tickUpper);
         BalanceDelta feesAccrued = toBalanceDelta(0, 0);
-        
-        DNASubscriber(subscriber).notifyBurn(
-            tokenId,
-            pos.owner,
-            info,
-            pos.liquidity,
-            feesAccrued
-        );
-        
+
+        DNASubscriber(subscriber).notifyBurn(tokenId, pos.owner, info, pos.liquidity, feesAccrued);
+
         delete positions[tokenId];
     }
 }
@@ -117,21 +120,16 @@ contract MockStateView {
     function getSlot0(PoolId)
         external
         pure
-        returns (
-            uint160 sqrtPriceX96,
-            int24 tick,
-            uint24 protocolFee,
-            uint24 lpFee
-        )
+        returns (uint160 sqrtPriceX96, int24 tick, uint24 protocolFee, uint24 lpFee)
     {
-        sqrtPriceX96 = 79228162514264337593543950336; // ~1.0
+        sqrtPriceX96 = 79_228_162_514_264_337_593_543_950_336; // ~1.0
         tick = 0;
         protocolFee = 0;
         lpFee = 3000;
     }
 
     function getLiquidity(PoolId) external pure returns (uint128) {
-        return 1000000e18;
+        return 1_000_000e18;
     }
 
     function getFeeGrowthGlobals(PoolId)
@@ -184,11 +182,11 @@ contract DNASubscriberTest is Test {
         // Deploy mock contracts
         posm = new MockPositionManager();
         stateView = new MockStateView();
-        
+
         // Deploy DNA contracts with mock addresses
         dnaSubscriber = new DNASubscriber(address(posm), address(stateView));
         dnaReader = new DNAReader(address(0), address(stateView), address(posm));
-        
+
         // Set subscriber in mock
         posm.setSubscriber(address(dnaSubscriber));
 
@@ -213,7 +211,7 @@ contract DNASubscriberTest is Test {
     // ============ Subscribe Tests ============
 
     function test_Subscribe_FirstPosition() public {
-        uint256 tokenId = posm.mint(alice, testPoolKey, -887220, 887220, 1000e18);
+        uint256 tokenId = posm.mint(alice, testPoolKey, -887_220, 887_220, 1000e18);
 
         vm.expectEmit(true, true, true, false);
         emit UserMilestone(alice, DNASubscriber.MilestoneType.FIRST_POSITION, 1, block.timestamp);
@@ -235,8 +233,8 @@ contract DNASubscriberTest is Test {
 
     function test_Subscribe_MultiplePositions() public {
         // Create multiple positions
-        uint256 tokenId1 = posm.mint(alice, testPoolKey, -887220, 887220, 100e18);
-        uint256 tokenId2 = posm.mint(alice, testPoolKey2, -887220, 887220, 200e18);
+        uint256 tokenId1 = posm.mint(alice, testPoolKey, -887_220, 887_220, 100e18);
+        uint256 tokenId2 = posm.mint(alice, testPoolKey2, -887_220, 887_220, 200e18);
 
         vm.startPrank(address(posm));
         dnaSubscriber.notifySubscribe(tokenId1, "");
@@ -252,8 +250,8 @@ contract DNASubscriberTest is Test {
 
     function test_Subscribe_SamePool() public {
         // Two positions in same pool
-        uint256 tokenId1 = posm.mint(alice, testPoolKey, -887220, 887220, 100e18);
-        uint256 tokenId2 = posm.mint(alice, testPoolKey, -887220, 887220, 200e18);
+        uint256 tokenId1 = posm.mint(alice, testPoolKey, -887_220, 887_220, 100e18);
+        uint256 tokenId2 = posm.mint(alice, testPoolKey, -887_220, 887_220, 200e18);
 
         vm.startPrank(address(posm));
         dnaSubscriber.notifySubscribe(tokenId1, "");
@@ -268,8 +266,8 @@ contract DNASubscriberTest is Test {
     // ============ Unsubscribe Tests ============
 
     function test_Unsubscribe() public {
-        uint256 tokenId = posm.mint(alice, testPoolKey, -887220, 887220, 1000e18);
-        
+        uint256 tokenId = posm.mint(alice, testPoolKey, -887_220, 887_220, 1000e18);
+
         vm.startPrank(address(posm));
         dnaSubscriber.notifySubscribe(tokenId, "");
         dnaSubscriber.notifyUnsubscribe(tokenId);
@@ -286,8 +284,8 @@ contract DNASubscriberTest is Test {
     // ============ Modify Liquidity Tests ============
 
     function test_ModifyLiquidity_Increase() public {
-        uint256 tokenId = posm.mint(alice, testPoolKey, -887220, 887220, 1000e18);
-        
+        uint256 tokenId = posm.mint(alice, testPoolKey, -887_220, 887_220, 1000e18);
+
         vm.prank(address(posm));
         dnaSubscriber.notifySubscribe(tokenId, "");
 
@@ -304,8 +302,8 @@ contract DNASubscriberTest is Test {
     }
 
     function test_ModifyLiquidity_Decrease() public {
-        uint256 tokenId = posm.mint(alice, testPoolKey, -887220, 887220, 1000e18);
-        
+        uint256 tokenId = posm.mint(alice, testPoolKey, -887_220, 887_220, 1000e18);
+
         vm.prank(address(posm));
         dnaSubscriber.notifySubscribe(tokenId, "");
 
@@ -320,14 +318,14 @@ contract DNASubscriberTest is Test {
     // ============ Burn Tests ============
 
     function test_Burn() public {
-        uint256 tokenId = posm.mint(alice, testPoolKey, -887220, 887220, 1000e18);
-        
+        uint256 tokenId = posm.mint(alice, testPoolKey, -887_220, 887_220, 1000e18);
+
         vm.prank(address(posm));
         dnaSubscriber.notifySubscribe(tokenId, "");
 
-        PositionInfo info = PositionInfoLibrary.initialize(testPoolKey, -887220, 887220);
+        PositionInfo info = PositionInfoLibrary.initialize(testPoolKey, -887_220, 887_220);
         BalanceDelta feesAccrued = toBalanceDelta(int128(int256(50e18)), int128(int256(25e18)));
-        
+
         vm.prank(address(posm));
         dnaSubscriber.notifyBurn(tokenId, alice, info, 1000e18, feesAccrued);
 
@@ -348,7 +346,7 @@ contract DNASubscriberTest is Test {
             // Ensure currency0 < currency1 for valid pool keys
             address token0 = address(uint160(0x1000 + i * 2));
             address token1 = address(uint160(0x1001 + i * 2));
-            
+
             PoolKey memory key = PoolKey({
                 currency0: Currency.wrap(token0),
                 currency1: Currency.wrap(token1),
@@ -356,8 +354,8 @@ contract DNASubscriberTest is Test {
                 tickSpacing: 60,
                 hooks: IHooks(address(0))
             });
-            
-            uint256 tokenId = posm.mint(alice, key, -887220, 887220, 100e18);
+
+            uint256 tokenId = posm.mint(alice, key, -887_220, 887_220, 100e18);
             vm.prank(address(posm));
             dnaSubscriber.notifySubscribe(tokenId, "");
         }
@@ -377,15 +375,15 @@ contract DNASubscriberTest is Test {
 
     function test_VolumeMilestones() public {
         PoolId poolId = testPoolKey.toId();
-        
+
         // Record swaps to hit volume milestones
         dnaSubscriber.recordSwap(alice, poolId, 1000e18); // $1K
-        
+
         DNASubscriber.MilestoneStatus memory milestones = dnaSubscriber.getUserMilestones(alice);
         assertTrue(milestones.volume1K);
 
         dnaSubscriber.recordSwap(alice, poolId, 9000e18); // Total $10K
-        
+
         milestones = dnaSubscriber.getUserMilestones(alice);
         assertTrue(milestones.volume10K);
     }
@@ -399,7 +397,7 @@ contract DNASubscriberTest is Test {
 
     function test_DNAScore_WithActivity() public {
         // Create positions
-        uint256 tokenId = posm.mint(alice, testPoolKey, -887220, 887220, 10000e18);
+        uint256 tokenId = posm.mint(alice, testPoolKey, -887_220, 887_220, 10_000e18);
         vm.prank(address(posm));
         dnaSubscriber.notifySubscribe(tokenId, "");
 
@@ -416,7 +414,7 @@ contract DNASubscriberTest is Test {
 
         uint256 score = dnaSubscriber.calculateDNAScore(alice);
         console.log("DNA Score:", score);
-        
+
         assertGt(score, 0);
     }
 
@@ -430,8 +428,8 @@ contract DNASubscriberTest is Test {
                 tickSpacing: 60,
                 hooks: IHooks(address(0))
             });
-            
-            uint256 tokenId = posm.mint(alice, key, -887220, 887220, 10000e18);
+
+            uint256 tokenId = posm.mint(alice, key, -887_220, 887_220, 10_000e18);
             vm.prank(address(posm));
             dnaSubscriber.notifySubscribe(tokenId, "");
         }
@@ -439,7 +437,7 @@ contract DNASubscriberTest is Test {
         // Add volume
         PoolId poolId = testPoolKey.toId();
         for (uint256 i = 0; i < 100; i++) {
-            dnaSubscriber.recordSwap(alice, poolId, 10000e18);
+            dnaSubscriber.recordSwap(alice, poolId, 10_000e18);
         }
 
         string memory tier = dnaSubscriber.getUserTier(alice);
@@ -449,9 +447,9 @@ contract DNASubscriberTest is Test {
     // ============ View Function Tests ============
 
     function test_GetActivePositions() public {
-        uint256 tokenId1 = posm.mint(alice, testPoolKey, -887220, 887220, 100e18);
-        uint256 tokenId2 = posm.mint(alice, testPoolKey, -887220, 887220, 200e18);
-        uint256 tokenId3 = posm.mint(alice, testPoolKey, -887220, 887220, 300e18);
+        uint256 tokenId1 = posm.mint(alice, testPoolKey, -887_220, 887_220, 100e18);
+        uint256 tokenId2 = posm.mint(alice, testPoolKey, -887_220, 887_220, 200e18);
+        uint256 tokenId3 = posm.mint(alice, testPoolKey, -887_220, 887_220, 300e18);
 
         vm.startPrank(address(posm));
         dnaSubscriber.notifySubscribe(tokenId1, "");
@@ -467,8 +465,8 @@ contract DNASubscriberTest is Test {
     }
 
     function test_GetOwnerTokenIds() public {
-        uint256 tokenId1 = posm.mint(alice, testPoolKey, -887220, 887220, 100e18);
-        uint256 tokenId2 = posm.mint(alice, testPoolKey, -887220, 887220, 200e18);
+        uint256 tokenId1 = posm.mint(alice, testPoolKey, -887_220, 887_220, 100e18);
+        uint256 tokenId2 = posm.mint(alice, testPoolKey, -887_220, 887_220, 200e18);
 
         vm.startPrank(address(posm));
         dnaSubscriber.notifySubscribe(tokenId1, "");
@@ -482,8 +480,8 @@ contract DNASubscriberTest is Test {
     function test_GetUserCount() public {
         assertEq(dnaSubscriber.getUserCount(), 0);
 
-        uint256 tokenId1 = posm.mint(alice, testPoolKey, -887220, 887220, 100e18);
-        uint256 tokenId2 = posm.mint(bob, testPoolKey, -887220, 887220, 200e18);
+        uint256 tokenId1 = posm.mint(alice, testPoolKey, -887_220, 887_220, 100e18);
+        uint256 tokenId2 = posm.mint(bob, testPoolKey, -887_220, 887_220, 200e18);
 
         vm.startPrank(address(posm));
         dnaSubscriber.notifySubscribe(tokenId1, "");
@@ -497,10 +495,10 @@ contract DNASubscriberTest is Test {
 
     function test_HasInteractedWithPool() public {
         PoolId poolId = testPoolKey.toId();
-        
+
         assertFalse(dnaSubscriber.hasInteractedWithPool(alice, poolId));
 
-        uint256 tokenId = posm.mint(alice, testPoolKey, -887220, 887220, 100e18);
+        uint256 tokenId = posm.mint(alice, testPoolKey, -887_220, 887_220, 100e18);
         vm.prank(address(posm));
         dnaSubscriber.notifySubscribe(tokenId, "");
 
@@ -510,7 +508,7 @@ contract DNASubscriberTest is Test {
     // ============ Access Control Tests ============
 
     function test_RevertIf_NotPositionManager() public {
-        uint256 tokenId = posm.mint(alice, testPoolKey, -887220, 887220, 100e18);
+        uint256 tokenId = posm.mint(alice, testPoolKey, -887_220, 887_220, 100e18);
 
         vm.prank(alice);
         vm.expectRevert("DNASubscriber: not PositionManager");
@@ -518,12 +516,12 @@ contract DNASubscriberTest is Test {
     }
 
     function test_RevertIf_UnsubscribeInactivePosition() public {
-        uint256 tokenId = posm.mint(alice, testPoolKey, -887220, 887220, 100e18);
-        
+        uint256 tokenId = posm.mint(alice, testPoolKey, -887_220, 887_220, 100e18);
+
         vm.startPrank(address(posm));
         dnaSubscriber.notifySubscribe(tokenId, "");
         dnaSubscriber.notifyUnsubscribe(tokenId);
-        
+
         vm.expectRevert("DNASubscriber: position not active");
         dnaSubscriber.notifyUnsubscribe(tokenId);
         vm.stopPrank();
@@ -532,13 +530,13 @@ contract DNASubscriberTest is Test {
     // ============ Protocol Stats Tests ============
 
     function test_ProtocolStats() public {
-        uint256 tokenId1 = posm.mint(alice, testPoolKey, -887220, 887220, 1000e18);
-        uint256 tokenId2 = posm.mint(bob, testPoolKey, -887220, 887220, 2000e18);
+        uint256 tokenId1 = posm.mint(alice, testPoolKey, -887_220, 887_220, 1000e18);
+        uint256 tokenId2 = posm.mint(bob, testPoolKey, -887_220, 887_220, 2000e18);
 
         vm.startPrank(address(posm));
         dnaSubscriber.notifySubscribe(tokenId1, "");
         dnaSubscriber.notifySubscribe(tokenId2, "");
-        
+
         BalanceDelta fees1 = toBalanceDelta(int128(int256(100e18)), 0);
         BalanceDelta fees2 = toBalanceDelta(int128(int256(200e18)), 0);
         dnaSubscriber.notifyModifyLiquidity(tokenId1, 0, fees1);
