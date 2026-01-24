@@ -69,9 +69,9 @@ address constant USDC = 0x036CbD53842c5426634e7929541eC2318f3dCF7e;
 // TICK CONSTANTS
 // =============================================================================
 
-int24 constant MIN_TICK = -887272;
-int24 constant MAX_TICK = 887272;
+int24 constant MIN_TICK = -887_272;
+int24 constant MAX_TICK = 887_272;
 int24 constant MIN_TICK_SPACING = 1;
-int24 constant MAX_TICK_SPACING = 16383;
-uint160 constant MIN_SQRT_PRICE = 4295128739;
-uint160 constant MAX_SQRT_PRICE = 1461446703485210103287273052203988822378723970342;
+int24 constant MAX_TICK_SPACING = 16_383;
+uint160 constant MIN_SQRT_PRICE = 4_295_128_739;
+uint160 constant MAX_SQRT_PRICE = 1_461_446_703_485_210_103_287_273_052_203_988_822_378_723_970_342;
