@@ -6,7 +6,10 @@ import {DNAReader} from "../src/DNAReader.sol";
 import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 import {PoolId, PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {Currency, CurrencyLibrary} from "@uniswap/v4-core/src/types/Currency.sol";
-import {PositionInfo, PositionInfoLibrary} from "@uniswap/v4-periphery/src/libraries/PositionInfoLibrary.sol";
+import {
+    PositionInfo,
+    PositionInfoLibrary
+} from "@uniswap/v4-periphery/src/libraries/PositionInfoLibrary.sol";
 import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 
@@ -54,19 +57,14 @@ contract MockStateView {
     function getSlot0(PoolId poolId)
         external
         view
-        returns (
-            uint160 sqrtPriceX96,
-            int24 tick,
-            uint24 protocolFee,
-            uint24 lpFee
-        )
+        returns (uint160 sqrtPriceX96, int24 tick, uint24 protocolFee, uint24 lpFee)
     {
         bytes32 poolIdBytes = PoolId.unwrap(poolId);
         PoolState memory state = poolStates[poolIdBytes];
-        
+
         // Default values if not set
         if (state.sqrtPriceX96 == 0) {
-            sqrtPriceX96 = 79228162514264337593543950336; // ~1.0
+            sqrtPriceX96 = 79_228_162_514_264_337_593_543_950_336; // ~1.0
             tick = 0;
             protocolFee = 0;
             lpFee = 3000;
@@ -81,7 +79,7 @@ contract MockStateView {
     function getLiquidity(PoolId poolId) external view returns (uint128) {
         bytes32 poolIdBytes = PoolId.unwrap(poolId);
         PoolState memory state = poolStates[poolIdBytes];
-        return state.liquidity == 0 ? 1000000e18 : state.liquidity;
+        return state.liquidity == 0 ? 1_000_000e18 : state.liquidity;
     }
 
     function getFeeGrowthGlobals(PoolId poolId)
@@ -162,7 +160,8 @@ contract MockPositionManager {
 /// @notice Simple mock for IPoolManager interface
 contract MockPoolManager {
     // Minimal implementation for DNAReader
-}
+
+    }
 
 /// @title DNAReaderTest
 /// @notice Comprehensive test suite for DNAReader contract
@@ -192,11 +191,8 @@ contract DNAReaderTest is Test {
         stateView = new MockStateView();
         positionManager = new MockPositionManager();
 
-        dnaReader = new DNAReader(
-            address(poolManager),
-            address(stateView),
-            address(positionManager)
-        );
+        dnaReader =
+            new DNAReader(address(poolManager), address(stateView), address(positionManager));
 
         // Create test pool keys
         testPoolKey = PoolKey({
@@ -220,7 +216,7 @@ contract DNAReaderTest is Test {
         testPoolKey3 = PoolKey({
             currency0: Currency.wrap(address(0x5)),
             currency1: Currency.wrap(address(0x6)),
-            fee: 10000,
+            fee: 10_000,
             tickSpacing: int24(200),
             hooks: IHooks(address(0))
         });
@@ -229,22 +225,22 @@ contract DNAReaderTest is Test {
         // Set default pool states
         stateView.setPoolState(
             testPoolId,
-            79228162514264337593543950336, // sqrtPriceX96 ~1.0
+            79_228_162_514_264_337_593_543_950_336, // sqrtPriceX96 ~1.0
             0, // tick
             0, // protocolFee
             3000, // lpFee
-            1000000e18, // liquidity
+            1_000_000e18, // liquidity
             1e18, // feeGrowthGlobal0
             2e18 // feeGrowthGlobal1
         );
 
         stateView.setPoolState(
             testPoolId2,
-            112067409394905471805547571228, // sqrtPriceX96 ~2.0
+            112_067_409_394_905_471_805_547_571_228, // sqrtPriceX96 ~2.0
             6931, // tick
             0,
             500,
-            2000000e18,
+            2_000_000e18,
             3e18,
             4e18
         );
@@ -260,11 +256,7 @@ contract DNAReaderTest is Test {
 
     function test_Deployment_ZeroAddress() public {
         // poolManager can be zero address (not used in view functions)
-        DNAReader reader = new DNAReader(
-            address(0),
-            address(stateView),
-            address(positionManager)
-        );
+        DNAReader reader = new DNAReader(address(0), address(stateView), address(positionManager));
         assertEq(address(reader.poolManager()), address(0));
         assertEq(address(reader.stateView()), address(stateView));
     }
@@ -275,11 +267,11 @@ contract DNAReaderTest is Test {
         DNAReader.PoolSnapshot memory snapshot = dnaReader.getPoolSnapshot(testPoolId);
 
         assertEq(snapshot.poolId, PoolId.unwrap(testPoolId));
-        assertEq(snapshot.sqrtPriceX96, 79228162514264337593543950336);
+        assertEq(snapshot.sqrtPriceX96, 79_228_162_514_264_337_593_543_950_336);
         assertEq(snapshot.tick, 0);
         assertEq(snapshot.protocolFee, 0);
         assertEq(snapshot.lpFee, 3000);
-        assertEq(snapshot.liquidity, 1000000e18);
+        assertEq(snapshot.liquidity, 1_000_000e18);
         assertEq(snapshot.feeGrowthGlobal0, 1e18);
         assertEq(snapshot.feeGrowthGlobal1, 2e18);
     }
@@ -288,10 +280,10 @@ contract DNAReaderTest is Test {
         DNAReader.PoolSnapshot memory snapshot = dnaReader.getPoolSnapshot(testPoolId2);
 
         assertEq(snapshot.poolId, PoolId.unwrap(testPoolId2));
-        assertEq(snapshot.sqrtPriceX96, 112067409394905471805547571228);
+        assertEq(snapshot.sqrtPriceX96, 112_067_409_394_905_471_805_547_571_228);
         assertEq(snapshot.tick, 6931);
         assertEq(snapshot.lpFee, 500);
-        assertEq(snapshot.liquidity, 2000000e18);
+        assertEq(snapshot.liquidity, 2_000_000e18);
         assertEq(snapshot.feeGrowthGlobal0, 3e18);
         assertEq(snapshot.feeGrowthGlobal1, 4e18);
     }
@@ -329,14 +321,14 @@ contract DNAReaderTest is Test {
                 hooks: IHooks(address(0))
             });
             poolIds[i] = key.toId();
-            
+
             stateView.setPoolState(
                 poolIds[i],
-                79228162514264337593543950336,
+                79_228_162_514_264_337_593_543_950_336,
                 int24(int256(i)),
                 0,
                 3000,
-                1000000e18,
+                1_000_000e18,
                 0,
                 0
             );
@@ -377,13 +369,7 @@ contract DNAReaderTest is Test {
     // ============ Position Reading Functions ============
 
     function test_GetPositionSnapshot_ValidPosition() public {
-        uint256 tokenId = positionManager.mint(
-            alice,
-            testPoolKey,
-            -1000,
-            1000,
-            1000e18
-        );
+        uint256 tokenId = positionManager.mint(alice, testPoolKey, -1000, 1000, 1000e18);
 
         DNAReader.PositionSnapshot memory snapshot = dnaReader.getPositionSnapshot(tokenId);
 
@@ -397,13 +383,7 @@ contract DNAReaderTest is Test {
 
     function test_GetPositionSnapshot_InRange() public {
         // Current tick is 0, position is -1000 to 1000, so it's in range
-        uint256 tokenId = positionManager.mint(
-            alice,
-            testPoolKey,
-            -1000,
-            1000,
-            1000e18
-        );
+        uint256 tokenId = positionManager.mint(alice, testPoolKey, -1000, 1000, 1000e18);
 
         DNAReader.PositionSnapshot memory snapshot = dnaReader.getPositionSnapshot(tokenId);
         assertTrue(snapshot.isInRange, "Position should be in range");
@@ -411,13 +391,7 @@ contract DNAReaderTest is Test {
 
     function test_GetPositionSnapshot_OutOfRange() public {
         // Current tick is 0, position is 1000 to 2000, so it's out of range
-        uint256 tokenId = positionManager.mint(
-            alice,
-            testPoolKey,
-            1000,
-            2000,
-            1000e18
-        );
+        uint256 tokenId = positionManager.mint(alice, testPoolKey, 1000, 2000, 1000e18);
 
         DNAReader.PositionSnapshot memory snapshot = dnaReader.getPositionSnapshot(tokenId);
         assertFalse(snapshot.isInRange, "Position should be out of range");
@@ -426,7 +400,7 @@ contract DNAReaderTest is Test {
     function test_GetPositionSnapshot_InvalidTokenId() public view {
         // Token ID 999 doesn't exist
         DNAReader.PositionSnapshot memory snapshot = dnaReader.getPositionSnapshot(999);
-        
+
         assertEq(snapshot.tokenId, 999);
         assertEq(snapshot.owner, address(0));
         assertEq(snapshot.liquidity, 0);
@@ -505,8 +479,10 @@ contract DNAReaderTest is Test {
     }
 
     function test_CheckPositionsInRange_Mixed() public {
-        uint256 tokenId1 = positionManager.mint(alice, testPoolKey, -1000, 1000, 1000e18); // In range
-        uint256 tokenId2 = positionManager.mint(bob, testPoolKey, 1000, 2000, 2000e18); // Out of range
+        uint256 tokenId1 = positionManager.mint(alice, testPoolKey, -1000, 1000, 1000e18); // In
+        // range
+        uint256 tokenId2 = positionManager.mint(bob, testPoolKey, 1000, 2000, 2000e18); // Out of
+        // range
 
         uint256[] memory tokenIds = new uint256[](2);
         tokenIds[0] = tokenId1;
@@ -537,17 +513,18 @@ contract DNAReaderTest is Test {
     // ============ Utility Functions ============
 
     function test_SqrtPriceToPrice_Basic() public {
-        // NOTE: Current implementation has overflow issues with standard Uniswap sqrtPriceX96 values
-        // The calculation (numerator * 1e18 * 10^decimals0) overflows before division
+        // NOTE: Current implementation has overflow issues with standard Uniswap sqrtPriceX96
+        // values The calculation (numerator * 1e18 * 10^decimals0) overflows before division
         // This test is skipped until the implementation is fixed to handle overflow properly
-        // In production, this function should use fixed-point math or do division before multiplication
-        
+        // In production, this function should use fixed-point math or do division before
+        // multiplication
+
         // For now, test with a very small value that won't overflow
         // Using 2^48 which gives: (2^96 * 1e18 * 10^18) / (2^192 * 10^18) = 2^96 / 2^192 = 1/2^96
         // But this is so small it rounds to 0, so we skip the assertion
-        uint160 sqrtPrice = uint160(281474976710656); // 2^48
+        uint160 sqrtPrice = uint160(281_474_976_710_656); // 2^48
         uint256 price = dnaReader.sqrtPriceToPrice(sqrtPrice, 18, 18);
-        
+
         // The function may return 0 due to rounding with small values
         // This is expected until the implementation is fixed
         // assertGt(price, 0); // Commented out until implementation is fixed
@@ -555,13 +532,13 @@ contract DNAReaderTest is Test {
 
     function test_SqrtPriceToPrice_DifferentDecimals() public view {
         // Test with smaller value to avoid overflow
-        uint160 sqrtPrice = uint160(281474976710656); // 2^48
+        uint160 sqrtPrice = uint160(281_474_976_710_656); // 2^48
         uint256 price = dnaReader.sqrtPriceToPrice(
             sqrtPrice,
             18, // WETH decimals
-            6   // USDC decimals
+            6 // USDC decimals
         );
-        
+
         // Should scale correctly
         assertGt(price, 0);
     }
@@ -571,17 +548,20 @@ contract DNAReaderTest is Test {
         // The calculation (numerator * 1e18 * 10^decimals0) overflows before division
         // This test verifies the function exists and can be called, but skips assertions
         // until the implementation is fixed to handle overflow properly
-        
+
         // Test with minimum sqrtPrice (very small, should not overflow but may round to 0)
         // Using try-catch to handle potential overflow
         try dnaReader.sqrtPriceToPrice(
-            4295128739, // MIN_SQRT_PRICE
+            4_295_128_739, // MIN_SQRT_PRICE
             18,
             18
-        ) returns (uint256 minPrice) {
-            // Function executed - implementation may need fixes for larger values
-            // assertGt(minPrice, 0); // Skipped due to potential rounding to 0
-        } catch {
+        ) returns (
+            uint256 minPrice
+        ) {
+        // Function executed - implementation may need fixes for larger values
+        // assertGt(minPrice, 0); // Skipped due to potential rounding to 0
+        }
+            catch {
             // Overflow occurred - expected until implementation is fixed
         }
     }
@@ -607,10 +587,10 @@ contract DNAReaderTest is Test {
 
     function test_TickToSqrtPriceX96_ExtremeTicks() public view {
         // Test with extreme ticks
-        uint160 sqrtPriceMin = dnaReader.tickToSqrtPriceX96(-887272);
+        uint160 sqrtPriceMin = dnaReader.tickToSqrtPriceX96(-887_272);
         assertGt(sqrtPriceMin, 0);
 
-        uint160 sqrtPriceMax = dnaReader.tickToSqrtPriceX96(887272);
+        uint160 sqrtPriceMax = dnaReader.tickToSqrtPriceX96(887_272);
         assertGt(sqrtPriceMax, 0);
         assertGt(sqrtPriceMax, sqrtPriceMin);
     }
@@ -619,32 +599,23 @@ contract DNAReaderTest is Test {
 
     function test_Multicall_SingleCall() public view {
         bytes[] memory calls = new bytes[](1);
-        calls[0] = abi.encodeWithSelector(
-            DNAReader.getCurrentTick.selector,
-            testPoolId
-        );
+        calls[0] = abi.encodeWithSelector(DNAReader.getCurrentTick.selector, testPoolId);
 
         bytes[] memory results = dnaReader.multicall(calls);
         assertEq(results.length, 1);
-        
+
         int24 tick = abi.decode(results[0], (int24));
         assertEq(tick, 0);
     }
 
     function test_Multicall_MultipleCalls() public view {
         bytes[] memory calls = new bytes[](2);
-        calls[0] = abi.encodeWithSelector(
-            DNAReader.getCurrentTick.selector,
-            testPoolId
-        );
-        calls[1] = abi.encodeWithSelector(
-            DNAReader.getCurrentTick.selector,
-            testPoolId2
-        );
+        calls[0] = abi.encodeWithSelector(DNAReader.getCurrentTick.selector, testPoolId);
+        calls[1] = abi.encodeWithSelector(DNAReader.getCurrentTick.selector, testPoolId2);
 
         bytes[] memory results = dnaReader.multicall(calls);
         assertEq(results.length, 2);
-        
+
         int24 tick1 = abi.decode(results[0], (int24));
         int24 tick2 = abi.decode(results[1], (int24));
         assertEq(tick1, 0);
@@ -655,29 +626,21 @@ contract DNAReaderTest is Test {
         uint256 tokenId = positionManager.mint(alice, testPoolKey, -1000, 1000, 1000e18);
 
         bytes[] memory calls = new bytes[](3);
-        calls[0] = abi.encodeWithSelector(
-            DNAReader.getCurrentTick.selector,
-            testPoolId
-        );
-        calls[1] = abi.encodeWithSelector(
-            DNAReader.getPoolSnapshot.selector,
-            testPoolId
-        );
-        calls[2] = abi.encodeWithSelector(
-            DNAReader.getPositionSnapshot.selector,
-            tokenId
-        );
+        calls[0] = abi.encodeWithSelector(DNAReader.getCurrentTick.selector, testPoolId);
+        calls[1] = abi.encodeWithSelector(DNAReader.getPoolSnapshot.selector, testPoolId);
+        calls[2] = abi.encodeWithSelector(DNAReader.getPositionSnapshot.selector, tokenId);
 
         bytes[] memory results = dnaReader.multicall(calls);
         assertEq(results.length, 3);
-        
+
         int24 tick = abi.decode(results[0], (int24));
         assertEq(tick, 0);
-        
+
         DNAReader.PoolSnapshot memory snapshot = abi.decode(results[1], (DNAReader.PoolSnapshot));
         assertEq(snapshot.tick, 0);
-        
-        DNAReader.PositionSnapshot memory posSnapshot = abi.decode(results[2], (DNAReader.PositionSnapshot));
+
+        DNAReader.PositionSnapshot memory posSnapshot =
+            abi.decode(results[2], (DNAReader.PositionSnapshot));
         assertEq(posSnapshot.owner, alice);
     }
 
