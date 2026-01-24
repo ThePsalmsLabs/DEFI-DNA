@@ -16,7 +16,12 @@ import {
   Loader2,
   AlertCircle,
   Wifi,
-  WifiOff
+  WifiOff,
+  Waves,
+  Star,
+  TreePine,
+  Sprout,
+  Seedling
 } from 'lucide-react';
 import { clsx } from 'clsx';
 
@@ -74,15 +79,15 @@ export default function LeaderboardPage() {
   useWebSocket({
     onConnect: () => {
       setWsConnected(true);
-      console.log('✅ WebSocket connected to leaderboard updates');
+      console.log('[WebSocket] Connected to leaderboard updates');
     },
     onDisconnect: () => {
       setWsConnected(false);
-      console.log('❌ WebSocket disconnected');
+      console.log('[WebSocket] Disconnected');
     },
     onUpdate: (data) => {
       if (data?.type === 'leaderboard_update' || data?.type === 'ranking_changes' || data?.type === 'new_leader') {
-        console.log('🔄 Leaderboard update received, refetching...');
+        console.log('[WebSocket] Leaderboard update received, refetching...');
         setLastUpdate(new Date());
         refetch();
       }
@@ -167,11 +172,11 @@ export default function LeaderboardPage() {
           className="px-4 py-2 bg-gray-800 rounded-xl border border-gray-700 hover:border-gray-600 transition text-sm"
         >
           <option value="">All Tiers</option>
-          <option value="Whale">🐋 Whale</option>
-          <option value="Expert">⭐ Expert</option>
-          <option value="Intermediate">🌳 Intermediate</option>
-          <option value="Beginner">🌿 Beginner</option>
-          <option value="Novice">🌱 Novice</option>
+          <option value="Whale">Whale</option>
+          <option value="Expert">Expert</option>
+          <option value="Intermediate">Intermediate</option>
+          <option value="Beginner">Beginner</option>
+          <option value="Novice">Novice</option>
         </select>
       </motion.div>
 
@@ -359,17 +364,18 @@ function TopCard({ user, rank, metric }: { user: LeaderboardEntry; rank: number;
 
 function TierBadge({ tier }: { tier: string }) {
   const tierClass = `tier-${tier.toLowerCase()}`;
-  const emoji = {
-    Whale: '🐋',
-    Expert: '⭐',
-    Intermediate: '🌳',
-    Beginner: '🌿',
-    Novice: '🌱',
-  }[tier] || '🌱';
+  const TierIcon = {
+    Whale: Waves,
+    Expert: Star,
+    Intermediate: TreePine,
+    Beginner: Sprout,
+    Novice: Seedling,
+  }[tier] || Seedling;
 
   return (
-    <span className={clsx('px-3 py-1 rounded-full text-xs font-medium border', tierClass)}>
-      {emoji} {tier}
+    <span className={clsx('px-3 py-1 rounded-full text-xs font-medium border flex items-center gap-1.5', tierClass)}>
+      <TierIcon className="w-3 h-3" />
+      {tier}
     </span>
   );
 }
