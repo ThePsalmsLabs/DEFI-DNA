@@ -15,8 +15,8 @@ contract DeployBaseSepolia is Script {
 
     // Base Sepolia addresses
     address constant BASE_SEPOLIA_POOL_MANAGER = 0x7Da1D65F8B249183667cdE74C5CBD46dD38AA829;
-    address constant BASE_SEPOLIA_POSITION_MANAGER = 0xB433Db97Fe3DB8748E5e2B2Dc8B4Fb9b5B8Eb75D;
-    address constant BASE_SEPOLIA_STATE_VIEW = 0x24C731645ACfCAbAD99b894A5C0e32dFb8448dFB;
+    address constant BASE_SEPOLIA_POSITION_MANAGER = 0xb433dB97Fe3dB8748E5e2B2dc8b4Fb9b5b8eb75d;
+    address constant BASE_SEPOLIA_STATE_VIEW = 0x24C731645AcfCaBAD99B894a5C0E32Dfb8448dfb;
 
     function run() public returns (address subscriberAddr, address readerAddr, address managerAddr) {
         // Verify we're on Base Sepolia
@@ -64,9 +64,8 @@ contract DeployBaseSepolia is Script {
         managerAddr = address(advancedPosManager);
         console.log("  AdvancedPositionManager deployed at:", managerAddr);
 
-        // Grant OPERATOR_ROLE to deployer
-        advancedPosManager.grantRole(advancedPosManager.OPERATOR_ROLE(), msg.sender);
-        console.log("  Granted OPERATOR_ROLE to deployer");
+        // Note: AdvancedPositionManager (V1) doesn't have AccessControl
+        // For V2 deployment with access control, use AdvancedPositionManagerV2
 
         vm.stopBroadcast();
 
@@ -187,12 +186,9 @@ contract DeployBaseMainnet is Script {
         managerAddr = address(advancedPosManager);
         console.log("  AdvancedPositionManager deployed at:", managerAddr);
 
-        // Grant OPERATOR_ROLE to deployer
-        advancedPosManager.grantRole(advancedPosManager.OPERATOR_ROLE(), msg.sender);
-        console.log("  Granted OPERATOR_ROLE to deployer");
-
-        // IMPORTANT: Grant EMERGENCY_ROLE to a separate multisig
-        // advancedPosManager.grantRole(advancedPosManager.EMERGENCY_ROLE(), MULTISIG_ADDRESS);
+        // Note: AdvancedPositionManager (V1) doesn't have AccessControl
+        // For V2 deployment with access control, use AdvancedPositionManagerV2
+        // IMPORTANT: For production with emergency controls, deploy V2 instead
 
         vm.stopBroadcast();
 
