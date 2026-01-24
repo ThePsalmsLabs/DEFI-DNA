@@ -7,7 +7,10 @@ import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 import {PoolId, PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {Currency, CurrencyLibrary} from "@uniswap/v4-core/src/types/Currency.sol";
 import {BalanceDelta} from "@uniswap/v4-core/src/types/BalanceDelta.sol";
-import {PositionInfo, PositionInfoLibrary} from "@uniswap/v4-periphery/src/libraries/PositionInfoLibrary.sol";
+import {
+    PositionInfo,
+    PositionInfoLibrary
+} from "@uniswap/v4-periphery/src/libraries/PositionInfoLibrary.sol";
 import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
 import {SafeCast} from "@uniswap/v4-core/src/libraries/SafeCast.sol";
 import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
@@ -20,7 +23,10 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 interface IPositionManagerMinimal {
     function ownerOf(uint256 tokenId) external view returns (address);
     function getPositionLiquidity(uint256 tokenId) external view returns (uint128);
-    function getPoolAndPositionInfo(uint256 tokenId) external view returns (PoolKey memory, PositionInfo);
+    function getPoolAndPositionInfo(uint256 tokenId)
+        external
+        view
+        returns (PoolKey memory, PositionInfo);
     function nextTokenId() external view returns (uint256);
 
     /// @notice Modify liquidity for a position
@@ -62,12 +68,7 @@ interface IPositionManagerMinimal {
 /// @notice PRODUCTION-READY contract for advanced Uniswap V4 position management
 /// @dev Implements flash accounting with comprehensive security features
 /// @custom:security-contact security@defidna.com
-contract AdvancedPositionManagerV2 is
-    IUnlockCallback,
-    AccessControl,
-    Pausable,
-    ReentrancyGuard
-{
+contract AdvancedPositionManagerV2 is IUnlockCallback, AccessControl, Pausable, ReentrancyGuard {
     using PoolIdLibrary for PoolKey;
     using CurrencyLibrary for Currency;
     using StateLibrary for IPoolManager;
@@ -103,11 +104,7 @@ contract AdvancedPositionManagerV2 is
         uint128 liquidity
     );
 
-    event EmergencyWithdrawal(
-        address indexed user,
-        uint256 indexed tokenId,
-        uint256 timestamp
-    );
+    event EmergencyWithdrawal(address indexed user, uint256 indexed tokenId, uint256 timestamp);
 
     event OwnershipSynced(
         uint256 indexed tokenId,
@@ -170,11 +167,7 @@ contract AdvancedPositionManagerV2 is
     /// @dev Called by PoolManager during flash accounting operations
     /// @param data Encoded operation data
     /// @return result Encoded result of the operation
-    function unlockCallback(bytes calldata data)
-        external
-        override
-        returns (bytes memory result)
-    {
+    function unlockCallback(bytes calldata data) external override returns (bytes memory result) {
         // CRITICAL: Only PoolManager can call this
         if (msg.sender != address(poolManager)) revert InvalidCaller();
 
@@ -207,12 +200,7 @@ contract AdvancedPositionManagerV2 is
         int256 minDelta0,
         int256 minDelta1,
         uint256 deadline
-    )
-        external
-        whenNotPaused
-        nonReentrant
-        returns (uint256 newTokenId)
-    {
+    ) external whenNotPaused nonReentrant returns (uint256 newTokenId) {
         // Verify ownership
         address posOwner = positionManager.ownerOf(tokenId);
         if (posOwner != msg.sender) revert PositionNotOwned();
@@ -279,13 +267,9 @@ contract AdvancedPositionManagerV2 is
     /// @dev Internal function executed during unlock callback for rebalancing
     /// @param data Encoded rebalance parameters
     /// @return result Encoded new token ID
-    function _executeRebalance(bytes calldata data)
-        internal
-        returns (bytes memory result)
-    {
+    function _executeRebalance(bytes calldata data) internal returns (bytes memory result) {
         // Decode all parameters
-        (
-            ,  // uint8 operationType (already decoded)
+        (, // uint8 operationType (already decoded)
             address owner,
             uint256 oldTokenId,
             PoolKey memory poolKey,
@@ -305,10 +289,10 @@ contract AdvancedPositionManagerV2 is
         // Note: This creates a delta - we receive tokens from the pool
         BalanceDelta decreaseDelta = positionManager.modifyLiquidity(
             oldTokenId,
-            -int256(uint256(liquidity)),  // Negative to decrease
-            0,  // amount0Min
-            0,  // amount1Min
-            bytes("")  // hookData
+            -int256(uint256(liquidity)), // Negative to decrease
+            0, // amount0Min
+            0, // amount1Min
+            bytes("") // hookData
         );
 
         // Step 2: Create new position with the same liquidity
@@ -318,16 +302,18 @@ contract AdvancedPositionManagerV2 is
             newTickLower,
             newTickUpper,
             liquidity,
-            type(uint128).max,  // amount0Max - will be calculated
-            type(uint128).max,  // amount1Max - will be calculated
+            type(uint128).max, // amount0Max - will be calculated
+            type(uint128).max, // amount1Max - will be calculated
             owner,
-            bytes("")  // hookData
+            bytes("") // hookData
         );
 
         // Step 3: Calculate net deltas
         // The deltas should approximately cancel out (may have small differences due to price)
-        int256 netDelta0 = int256(int128(decreaseDelta.amount0())) + int256(int128(increaseDelta.amount0()));
-        int256 netDelta1 = int256(int128(decreaseDelta.amount1())) + int256(int128(increaseDelta.amount1()));
+        int256 netDelta0 =
+            int256(int128(decreaseDelta.amount0())) + int256(int128(increaseDelta.amount0()));
+        int256 netDelta1 =
+            int256(int128(decreaseDelta.amount1())) + int256(int128(increaseDelta.amount1()));
 
         // Step 4: Validate slippage protection
         _validateSlippage(netDelta0, netDelta1, minDelta0, minDelta1);
@@ -346,20 +332,18 @@ contract AdvancedPositionManagerV2 is
     /// @param delta1 Actual delta for token1
     /// @param minDelta0 Minimum acceptable delta for token0
     /// @param minDelta1 Minimum acceptable delta for token1
-    function _validateSlippage(
-        int256 delta0,
-        int256 delta1,
-        int256 minDelta0,
-        int256 minDelta1
-    ) internal pure {
+    function _validateSlippage(int256 delta0, int256 delta1, int256 minDelta0, int256 minDelta1)
+        internal
+        pure
+    {
         // Check user's minimum requirements
         if (delta0 < minDelta0) revert SlippageTooHigh();
         if (delta1 < minDelta1) revert SlippageTooHigh();
 
         // Additional check: Ensure slippage is within maximum bounds (5%)
         // Calculate maximum allowed deviation
-        int256 maxSlippage0 = (minDelta0 * int256(10000 + MAX_SLIPPAGE_BPS)) / 10000;
-        int256 maxSlippage1 = (minDelta1 * int256(10000 + MAX_SLIPPAGE_BPS)) / 10000;
+        int256 maxSlippage0 = (minDelta0 * int256(10_000 + MAX_SLIPPAGE_BPS)) / 10_000;
+        int256 maxSlippage1 = (minDelta1 * int256(10_000 + MAX_SLIPPAGE_BPS)) / 10_000;
 
         if (delta0 > maxSlippage0 || delta1 > maxSlippage1) {
             revert SlippageTooHigh();
@@ -372,12 +356,9 @@ contract AdvancedPositionManagerV2 is
     /// @param owner The position owner
     /// @param delta0 Net delta for token0
     /// @param delta1 Net delta for token1
-    function _settleDelta(
-        PoolKey memory poolKey,
-        address owner,
-        int256 delta0,
-        int256 delta1
-    ) internal {
+    function _settleDelta(PoolKey memory poolKey, address owner, int256 delta0, int256 delta1)
+        internal
+    {
         // Handle token0
         if (delta0 > 0) {
             // Pool owes us token0 - transfer to owner
@@ -389,11 +370,8 @@ contract AdvancedPositionManagerV2 is
             // We owe token0 to pool - transfer from owner
             Currency token0 = poolKey.currency0;
             if (!token0.isAddressZero()) {
-                IERC20(Currency.unwrap(token0)).safeTransferFrom(
-                    owner,
-                    address(poolManager),
-                    uint256(-delta0)
-                );
+                IERC20(Currency.unwrap(token0))
+                    .safeTransferFrom(owner, address(poolManager), uint256(-delta0));
                 poolManager.settle();
             }
         }
@@ -409,11 +387,8 @@ contract AdvancedPositionManagerV2 is
             // We owe token1 to pool - transfer from owner
             Currency token1 = poolKey.currency1;
             if (!token1.isAddressZero()) {
-                IERC20(Currency.unwrap(token1)).safeTransferFrom(
-                    owner,
-                    address(poolManager),
-                    uint256(-delta1)
-                );
+                IERC20(Currency.unwrap(token1))
+                    .safeTransferFrom(owner, address(poolManager), uint256(-delta1));
                 poolManager.settle();
             }
         }
@@ -493,13 +468,8 @@ contract AdvancedPositionManagerV2 is
     /// @notice Check if contract supports interface
     /// @param interfaceId The interface identifier
     /// @return supported True if interface is supported
-    function supportsInterface(bytes4 interfaceId)
-        public
-        view
-        override
-        returns (bool)
-    {
-        return interfaceId == type(IUnlockCallback).interfaceId ||
-               super.supportsInterface(interfaceId);
+    function supportsInterface(bytes4 interfaceId) public view override returns (bool) {
+        return
+            interfaceId == type(IUnlockCallback).interfaceId || super.supportsInterface(interfaceId);
     }
 }
