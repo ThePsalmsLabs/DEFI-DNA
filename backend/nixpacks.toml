@@ -1,0 +1,14 @@
+# Nixpacks configuration for Railway
+# Railway will use this if Dockerfile is not present
+
+[phases.setup]
+nixPkgs = ["nodejs_20", "npm"]
+
+[phases.install]
+cmds = ["npm ci"]
+
+[phases.build]
+cmds = ["npm run build"]
+
+[start]
+cmd = "npm start"
