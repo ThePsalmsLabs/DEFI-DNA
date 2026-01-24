@@ -15,35 +15,26 @@ contract DeployScript is Script {
     function run() public {
         uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
         address deployer = vm.addr(deployerPrivateKey);
-        
+
         console.log("Deployer:", deployer);
         console.log("Chain ID:", block.chainid);
-        
+
         // Verify we're on Base Sepolia
-        require(block.chainid == 84532, "Deploy on Base Sepolia only (chain 84532)");
-        
+        require(block.chainid == 84_532, "Deploy on Base Sepolia only (chain 84532)");
+
         vm.startBroadcast(deployerPrivateKey);
 
         // Deploy DNASubscriber
-        DNASubscriber dnaSubscriber = new DNASubscriber(
-            POSITION_MANAGER,
-            STATE_VIEW
-        );
+        DNASubscriber dnaSubscriber = new DNASubscriber(POSITION_MANAGER, STATE_VIEW);
         console.log("DNASubscriber deployed at:", address(dnaSubscriber));
 
         // Deploy DNAReader
-        DNAReader dnaReader = new DNAReader(
-            POOL_MANAGER,
-            STATE_VIEW,
-            POSITION_MANAGER
-        );
+        DNAReader dnaReader = new DNAReader(POOL_MANAGER, STATE_VIEW, POSITION_MANAGER);
         console.log("DNAReader deployed at:", address(dnaReader));
 
         // Deploy AdvancedPositionManager
-        AdvancedPositionManager advancedPosManager = new AdvancedPositionManager(
-            POOL_MANAGER,
-            POSITION_MANAGER
-        );
+        AdvancedPositionManager advancedPosManager =
+            new AdvancedPositionManager(POOL_MANAGER, POSITION_MANAGER);
         console.log("AdvancedPositionManager deployed at:", address(advancedPosManager));
 
         vm.stopBroadcast();
@@ -80,28 +71,21 @@ contract DeployMainnetScript is Script {
 
     function run() public {
         uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
-        
+
         require(block.chainid == 1, "Deploy on Mainnet only (chain 1)");
-        
+
         vm.startBroadcast(deployerPrivateKey);
 
-        DNASubscriber dnaSubscriber = new DNASubscriber(
-            MAINNET_POSITION_MANAGER,
-            MAINNET_STATE_VIEW
-        );
+        DNASubscriber dnaSubscriber =
+            new DNASubscriber(MAINNET_POSITION_MANAGER, MAINNET_STATE_VIEW);
         console.log("DNASubscriber deployed at:", address(dnaSubscriber));
 
-        DNAReader dnaReader = new DNAReader(
-            MAINNET_POOL_MANAGER,
-            MAINNET_STATE_VIEW,
-            MAINNET_POSITION_MANAGER
-        );
+        DNAReader dnaReader =
+            new DNAReader(MAINNET_POOL_MANAGER, MAINNET_STATE_VIEW, MAINNET_POSITION_MANAGER);
         console.log("DNAReader deployed at:", address(dnaReader));
 
-        AdvancedPositionManager advancedPosManager = new AdvancedPositionManager(
-            MAINNET_POOL_MANAGER,
-            MAINNET_POSITION_MANAGER
-        );
+        AdvancedPositionManager advancedPosManager =
+            new AdvancedPositionManager(MAINNET_POOL_MANAGER, MAINNET_POSITION_MANAGER);
         console.log("AdvancedPositionManager deployed at:", address(advancedPosManager));
 
         vm.stopBroadcast();
@@ -113,13 +97,14 @@ contract DeployMainnetScript is Script {
 contract DeployLocalScript is Script {
     function run() public {
         // Use default Anvil private key
-        uint256 deployerPrivateKey = 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80;
-        
+        uint256 deployerPrivateKey =
+            0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80;
+
         vm.startBroadcast(deployerPrivateKey);
 
         // For local testing, deploy with zero addresses (would need mocks in real testing)
         // This is just a placeholder for structure
-        
+
         console.log("Local deployment - would deploy with mock contracts");
 
         vm.stopBroadcast();
