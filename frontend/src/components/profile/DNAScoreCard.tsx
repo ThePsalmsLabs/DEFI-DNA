@@ -2,6 +2,7 @@
 
 import { motion } from 'framer-motion';
 import { clsx } from 'clsx';
+import { Waves, Star, TreePine, Sprout, Seedling } from 'lucide-react';
 
 interface DNAScoreCardProps {
   score: number;
@@ -39,10 +40,11 @@ export function DNAScoreCard({ score, tier, breakdown }: DNAScoreCardProps) {
             <p className="text-white/60 text-sm">Your unique on-chain identity</p>
           </div>
           <span className={clsx(
-            'px-3 py-1 rounded-full text-sm font-medium border',
+            'px-3 py-1 rounded-full text-sm font-medium border flex items-center gap-1.5',
             tierConfig.badge
           )}>
-            {tierConfig.emoji} {tier}
+            <tierConfig.icon className="w-3.5 h-3.5" />
+            {tier}
           </span>
         </div>
 
@@ -129,31 +131,31 @@ function getTierConfig(tier: string) {
       return {
         gradient: 'from-amber-500 to-orange-600',
         badge: 'bg-amber-500/20 text-amber-100 border-amber-400/30',
-        emoji: '🐋',
+        icon: Waves,
       };
     case 'expert':
       return {
         gradient: 'from-purple-500 to-violet-600',
         badge: 'bg-purple-500/20 text-purple-100 border-purple-400/30',
-        emoji: '⭐',
+        icon: Star,
       };
     case 'intermediate':
       return {
         gradient: 'from-blue-500 to-cyan-600',
         badge: 'bg-blue-500/20 text-blue-100 border-blue-400/30',
-        emoji: '🌳',
+        icon: TreePine,
       };
     case 'beginner':
       return {
         gradient: 'from-emerald-500 to-green-600',
         badge: 'bg-emerald-500/20 text-emerald-100 border-emerald-400/30',
-        emoji: '🌿',
+        icon: Sprout,
       };
     default:
       return {
         gradient: 'from-gray-500 to-gray-600',
         badge: 'bg-gray-500/20 text-gray-100 border-gray-400/30',
-        emoji: '🌱',
+        icon: Seedling,
       };
   }
 }
