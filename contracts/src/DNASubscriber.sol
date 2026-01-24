@@ -6,13 +6,19 @@ import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 import {PoolId, PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
 import {BalanceDelta, BalanceDeltaLibrary} from "@uniswap/v4-core/src/types/BalanceDelta.sol";
-import {PositionInfo, PositionInfoLibrary} from "@uniswap/v4-periphery/src/libraries/PositionInfoLibrary.sol";
+import {
+    PositionInfo,
+    PositionInfoLibrary
+} from "@uniswap/v4-periphery/src/libraries/PositionInfoLibrary.sol";
 
 /// @notice Minimal interface for PositionManager functions we need
 interface IPositionManagerMinimal {
     function ownerOf(uint256 tokenId) external view returns (address);
     function getPositionLiquidity(uint256 tokenId) external view returns (uint128);
-    function getPoolAndPositionInfo(uint256 tokenId) external view returns (PoolKey memory, PositionInfo);
+    function getPoolAndPositionInfo(uint256 tokenId)
+        external
+        view
+        returns (PoolKey memory, PositionInfo);
 }
 
 /// @notice Minimal interface for StateView functions we need
@@ -46,18 +52,12 @@ contract DNASubscriber is ISubscriber {
 
     /// @notice Emitted when a user reaches a milestone
     event UserMilestone(
-        address indexed user,
-        MilestoneType milestoneType,
-        uint256 value,
-        uint256 timestamp
+        address indexed user, MilestoneType milestoneType, uint256 value, uint256 timestamp
     );
 
     /// @notice Emitted when user stats are updated
     event StatsUpdated(
-        address indexed user,
-        uint32 totalPositions,
-        uint32 activePositions,
-        uint128 totalFeesEarned
+        address indexed user, uint32 totalPositions, uint32 activePositions, uint128 totalFeesEarned
     );
 
     // ============ Errors ============
@@ -238,7 +238,7 @@ contract DNASubscriber is ISubscriber {
         // Update user stats
         UserStats storage stats = userStats[owner];
         stats.lastActionTimestamp = uint64(block.timestamp);
-        
+
         if (!isResubscribe) {
             // New position
             stats.totalPositions++;
@@ -247,7 +247,7 @@ contract DNASubscriber is ISubscriber {
             // Ownership changed - update mappings
             _syncOwnership(tokenId, oldOwner, owner);
         }
-        
+
         stats.activePositions++;
         stats.totalLiquidityProvided += liquidity;
 
@@ -265,7 +265,8 @@ contract DNASubscriber is ISubscriber {
             tickLower: tickLower,
             tickUpper: tickUpper,
             liquidity: liquidity,
-            createdAt: isResubscribe ? pos.createdAt : uint64(block.timestamp), // Keep original creation time
+            createdAt: isResubscribe ? pos.createdAt : uint64(block.timestamp), // Keep original
+            // creation time
             isActive: true
         });
 
@@ -278,22 +279,10 @@ contract DNASubscriber is ISubscriber {
         _checkPositionMilestones(owner, stats.totalPositions);
 
         emit UserAction(
-            owner,
-            poolId,
-            tokenId,
-            ActionType.SUBSCRIBE,
-            liquidity,
-            0,
-            0,
-            block.timestamp
+            owner, poolId, tokenId, ActionType.SUBSCRIBE, liquidity, 0, 0, block.timestamp
         );
 
-        emit StatsUpdated(
-            owner,
-            stats.totalPositions,
-            stats.activePositions,
-            stats.totalFeesEarned
-        );
+        emit StatsUpdated(owner, stats.totalPositions, stats.activePositions, stats.totalFeesEarned);
     }
 
     /// @notice Called when a position unsubscribes
@@ -308,7 +297,7 @@ contract DNASubscriber is ISubscriber {
 
         // Check current owner - if different, this is a transfer
         address currentOwner = posm.ownerOf(tokenId);
-        
+
         // Update user stats for old owner
         UserStats storage oldStats = userStats[oldOwner];
         oldStats.activePositions--;
@@ -322,22 +311,10 @@ contract DNASubscriber is ISubscriber {
             _syncOwnership(tokenId, oldOwner, currentOwner);
         }
 
-        emit UserAction(
-            oldOwner,
-            poolId,
-            tokenId,
-            ActionType.UNSUBSCRIBE,
-            0,
-            0,
-            0,
-            block.timestamp
-        );
+        emit UserAction(oldOwner, poolId, tokenId, ActionType.UNSUBSCRIBE, 0, 0, 0, block.timestamp);
 
         emit StatsUpdated(
-            oldOwner,
-            oldStats.totalPositions,
-            oldStats.activePositions,
-            oldStats.totalFeesEarned
+            oldOwner, oldStats.totalPositions, oldStats.activePositions, oldStats.totalFeesEarned
         );
     }
 
@@ -373,14 +350,14 @@ contract DNASubscriber is ISubscriber {
         // Extract fees from BalanceDelta
         int128 fees0 = feesAccrued.amount0();
         int128 fees1 = feesAccrued.amount1();
-        
+
         // Track positive fees (fees collected)
         if (fees0 > 0 || fees1 > 0) {
             // Sum up absolute fees for tracking (simplified)
             uint128 totalFees = 0;
             if (fees0 > 0) totalFees += uint128(uint256(int256(fees0)));
             if (fees1 > 0) totalFees += uint128(uint256(int256(fees1)));
-            
+
             stats.totalFeesEarned += totalFees;
             totalFeesCollected += totalFees;
             _checkFeesMilestones(owner, stats.totalFeesEarned);
@@ -397,12 +374,7 @@ contract DNASubscriber is ISubscriber {
             block.timestamp
         );
 
-        emit StatsUpdated(
-            owner,
-            stats.totalPositions,
-            stats.activePositions,
-            stats.totalFeesEarned
-        );
+        emit StatsUpdated(owner, stats.totalPositions, stats.activePositions, stats.totalFeesEarned);
     }
 
     /// @notice Called when a position is burned
@@ -431,12 +403,12 @@ contract DNASubscriber is ISubscriber {
         // Extract fees from BalanceDelta
         int128 fees0 = feesAccrued.amount0();
         int128 fees1 = feesAccrued.amount1();
-        
+
         if (fees0 > 0 || fees1 > 0) {
             uint128 totalFees = 0;
             if (fees0 > 0) totalFees += uint128(uint256(int256(fees0)));
             if (fees1 > 0) totalFees += uint128(uint256(int256(fees1)));
-            
+
             stats.totalFeesEarned += totalFees;
             totalFeesCollected += totalFees;
             _checkFeesMilestones(owner, stats.totalFeesEarned);
@@ -457,12 +429,7 @@ contract DNASubscriber is ISubscriber {
             block.timestamp
         );
 
-        emit StatsUpdated(
-            owner,
-            stats.totalPositions,
-            stats.activePositions,
-            stats.totalFeesEarned
-        );
+        emit StatsUpdated(owner, stats.totalPositions, stats.activePositions, stats.totalFeesEarned);
     }
 
     // ============ External Functions ============
@@ -471,13 +438,9 @@ contract DNASubscriber is ISubscriber {
     /// @param user The user who swapped
     /// @param poolId The pool ID
     /// @param volumeUsd The volume in USD (scaled by 1e18)
-    function recordSwap(
-        address user,
-        PoolId poolId,
-        uint128 volumeUsd
-    ) external onlyAllowedCaller {
+    function recordSwap(address user, PoolId poolId, uint128 volumeUsd) external onlyAllowedCaller {
         bytes32 poolIdBytes = PoolId.unwrap(poolId);
-        
+
         if (!isRegisteredUser[user]) {
             _registerUser(user);
         }
@@ -581,7 +544,7 @@ contract DNASubscriber is ISubscriber {
     /// @return score The DNA score (0-100)
     function calculateDNAScore(address user) external view returns (uint256 score) {
         UserStats memory stats = userStats[user];
-        
+
         if (stats.firstActionTimestamp == 0) {
             return 0;
         }
@@ -597,12 +560,12 @@ contract DNASubscriber is ISubscriber {
         else if (volumeUsd >= 1_000_000) volumeScore = 20;
         else if (volumeUsd >= 100_000) volumeScore = 15;
         else if (volumeUsd >= 10_000) volumeScore = 10;
-        else if (volumeUsd >= 1_000) volumeScore = 5;
+        else if (volumeUsd >= 1000) volumeScore = 5;
 
         // LP Efficiency Score (25%)
         uint256 efficiencyScore = 0;
         if (stats.totalLiquidityProvided > 0) {
-            uint256 efficiency = (stats.totalFeesEarned * 10000) / stats.totalLiquidityProvided;
+            uint256 efficiency = (stats.totalFeesEarned * 10_000) / stats.totalLiquidityProvided;
             if (efficiency >= 500) efficiencyScore = 25;
             else if (efficiency >= 200) efficiencyScore = 20;
             else if (efficiency >= 100) efficiencyScore = 15;
@@ -627,7 +590,8 @@ contract DNASubscriber is ISubscriber {
         else if (totalActions >= 50) consistencyScore = 6;
         else if (totalActions >= 10) consistencyScore = 3;
 
-        score = earlyAdopterScore + volumeScore + efficiencyScore + diversityScore + consistencyScore;
+        score =
+            earlyAdopterScore + volumeScore + efficiencyScore + diversityScore + consistencyScore;
     }
 
     /// @notice Get user tier based on DNA score
@@ -635,7 +599,7 @@ contract DNASubscriber is ISubscriber {
     /// @return tier The tier name
     function getUserTier(address user) external view returns (string memory tier) {
         uint256 score = this.calculateDNAScore(user);
-        
+
         if (score >= 80) return "Whale";
         if (score >= 60) return "Expert";
         if (score >= 40) return "Intermediate";
@@ -649,9 +613,9 @@ contract DNASubscriber is ISubscriber {
         isRegisteredUser[user] = true;
         allUsers.push(user);
         totalUsers++;
-        
+
         userStats[user].firstActionTimestamp = uint64(block.timestamp);
-        
+
         // Trigger both first position milestones for new users
         _checkMilestone(user, MilestoneType.FIRST_POSITION, 1);
         _checkMilestone(user, MilestoneType.FIRST_V4_POSITION, 1);
@@ -720,7 +684,7 @@ contract DNASubscriber is ISubscriber {
             status.fees1000 = true;
             emit UserMilestone(user, MilestoneType.FEES_EARNED_1000, feesInUnits, block.timestamp);
         }
-        if (feesInUnits >= 10000 && !status.fees10000) {
+        if (feesInUnits >= 10_000 && !status.fees10000) {
             status.fees10000 = true;
             emit UserMilestone(user, MilestoneType.FEES_EARNED_10000, feesInUnits, block.timestamp);
         }
@@ -730,7 +694,7 @@ contract DNASubscriber is ISubscriber {
         MilestoneStatus storage status = userMilestones[user];
         uint256 volumeInUnits = totalVolume / 1e18;
 
-        if (volumeInUnits >= 1_000 && !status.volume1K) {
+        if (volumeInUnits >= 1000 && !status.volume1K) {
             status.volume1K = true;
             emit UserMilestone(user, MilestoneType.TOTAL_VOLUME_1K, volumeInUnits, block.timestamp);
         }
@@ -740,7 +704,9 @@ contract DNASubscriber is ISubscriber {
         }
         if (volumeInUnits >= 100_000 && !status.volume100K) {
             status.volume100K = true;
-            emit UserMilestone(user, MilestoneType.TOTAL_VOLUME_100K, volumeInUnits, block.timestamp);
+            emit UserMilestone(
+                user, MilestoneType.TOTAL_VOLUME_100K, volumeInUnits, block.timestamp
+            );
         }
         if (volumeInUnits >= 1_000_000 && !status.volume1M) {
             status.volume1M = true;
@@ -813,7 +779,7 @@ contract DNASubscriber is ISubscriber {
     function syncOwnership(uint256 tokenId) external {
         PositionData storage pos = positions[tokenId];
         address currentOwner = posm.ownerOf(tokenId);
-        
+
         // Only sync if ownership changed
         if (currentOwner != pos.owner && currentOwner != address(0)) {
             address oldOwner = pos.owner;
