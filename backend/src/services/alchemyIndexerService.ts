@@ -72,6 +72,10 @@ export class AlchemyIndexerService {
   private readonly POOL_MANAGER_ADDRESS = '0x0000000000000000000000000000000000000000'; // TODO: Get actual address
 
   constructor(rpcUrl: string, chainId: number = 8453) {
+    if (!rpcUrl || typeof rpcUrl !== 'string') {
+      throw new Error('Invalid RPC URL provided to AlchemyIndexerService');
+    }
+
     this.rpcUrl = rpcUrl;
     this.chainId = chainId;
     
@@ -81,34 +85,97 @@ export class AlchemyIndexerService {
     
     if (!this.apiKey) {
       console.warn('⚠️ Alchemy API key not found in RPC URL. Indexer will have limited functionality.');
+      // Use a placeholder to prevent invalid baseURL
+      this.apiKey = 'placeholder';
     }
 
-    // Create axios instance for Alchemy API calls
-    this.axiosInstance = axios.create({
-      baseURL: `https://base-mainnet.g.alchemy.com/v2/${this.apiKey}`,
-      timeout: 30000,
-      headers: {
-        'Content-Type': 'application/json',
-      },
-    });
+    // Create axios instance for Alchemy API calls with error handling
+    try {
+      this.axiosInstance = axios.create({
+        baseURL: `https://base-mainnet.g.alchemy.com/v2/${this.apiKey}`,
+        timeout: 30000,
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
 
-    this.provider = new ethers.JsonRpcProvider(rpcUrl);
+      // Add response interceptor for better error handling
+      this.axiosInstance.interceptors.response.use(
+        (response) => response,
+        (error) => {
+          if (error.code === 'ECONNABORTED') {
+            console.error('Alchemy API request timeout');
+          } else if (error.response) {
+            console.error(`Alchemy API error: ${error.response.status} - ${error.response.statusText}`);
+          } else if (error.request) {
+            console.error('Alchemy API request failed - no response received');
+          }
+          return Promise.reject(error);
+        }
+      );
+    } catch (error) {
+      console.error('Failed to create axios instance:', error);
+      throw new Error('Failed to initialize Alchemy indexer HTTP client');
+    }
+
+    // Initialize provider with error handling
+    try {
+      this.provider = new ethers.JsonRpcProvider(rpcUrl);
+    } catch (error) {
+      console.error('Failed to initialize ethers provider:', error);
+      throw new Error('Failed to initialize blockchain provider');
+    }
   }
 
   /**
    * Get comprehensive wallet data from Alchemy Enhanced APIs
    */
   async getWalletData(address: string, fromBlock?: number, toBlock?: number): Promise<IndexedWalletData> {
+    // Validate address
+    if (!address || !ethers.isAddress(address)) {
+      throw new Error('Invalid wallet address provided to getWalletData');
+    }
+
     const normalizedAddress = ethers.getAddress(address);
 
-    // Fetch NFT transfers (PositionManager tokens)
-    const positions = await this.getPositionTransfers(normalizedAddress, fromBlock, toBlock);
+    // Initialize default return value
+    const defaultData: IndexedWalletData = {
+      address: normalizedAddress,
+      positions: [],
+      swaps: [],
+      totalTransactions: 0,
+      firstTransactionBlock: 0,
+      lastTransactionBlock: 0,
+      firstTransactionTimestamp: 0,
+      lastTransactionTimestamp: 0,
+    };
 
-    // Fetch all transactions to find swaps and other interactions
-    const transactions = await this.getTransactions(normalizedAddress, fromBlock, toBlock);
+    // Fetch NFT transfers (PositionManager tokens) with error handling
+    let positions: PositionTransfer[] = [];
+    try {
+      positions = await this.getPositionTransfers(normalizedAddress, fromBlock, toBlock);
+    } catch (error: any) {
+      console.error('Error fetching position transfers:', error.message);
+      // Continue with empty positions
+    }
 
-    // Parse swap events from transaction logs
-    const swaps = await this.parseSwapEvents(transactions);
+    // Fetch all transactions to find swaps and other interactions with error handling
+    let transactions: TransactionData[] = [];
+    try {
+      transactions = await this.getTransactions(normalizedAddress, fromBlock, toBlock);
+    } catch (error: any) {
+      console.error('Error fetching transactions:', error.message);
+      // Continue with empty transactions
+    }
+
+    // Parse swap events from transaction logs with error handling
+    let swaps: SwapEvent[] = [];
+    try {
+      swaps = await this.parseSwapEvents(transactions);
+    } catch (error: any) {
+      console.error('Error parsing swap events:', error.message);
+      // Continue with empty swaps
+    }
 
     // Calculate first/last transaction timestamps
     const allBlocks = [
@@ -119,24 +186,34 @@ export class AlchemyIndexerService {
     const firstBlock = allBlocks.length > 0 ? Math.min(...allBlocks) : 0;
     const lastBlock = allBlocks.length > 0 ? Math.max(...allBlocks) : 0;
 
-    // Get timestamps for blocks
+    // Get timestamps for blocks with timeout protection
     let firstTimestamp = 0;
     let lastTimestamp = 0;
     if (firstBlock > 0) {
       try {
-        const firstBlockData = await this.provider.getBlock(firstBlock);
+        const firstBlockData = await Promise.race([
+          this.provider.getBlock(firstBlock),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), 10000))
+        ]) as any;
         firstTimestamp = firstBlockData?.timestamp || 0;
-      } catch (error) {
-        console.error('Error fetching first block timestamp:', error);
+      } catch (error: any) {
+        console.error(`Error fetching first block ${firstBlock} timestamp:`, error.message);
+        // Continue without timestamp
       }
     }
-    if (lastBlock > 0) {
+    if (lastBlock > 0 && lastBlock !== firstBlock) {
       try {
-        const lastBlockData = await this.provider.getBlock(lastBlock);
+        const lastBlockData = await Promise.race([
+          this.provider.getBlock(lastBlock),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), 10000))
+        ]) as any;
         lastTimestamp = lastBlockData?.timestamp || 0;
-      } catch (error) {
-        console.error('Error fetching last block timestamp:', error);
+      } catch (error: any) {
+        console.error(`Error fetching last block ${lastBlock} timestamp:`, error.message);
+        // Continue without timestamp
       }
+    } else if (lastBlock === firstBlock && firstTimestamp > 0) {
+      lastTimestamp = firstTimestamp;
     }
 
     return {
@@ -311,15 +388,27 @@ export class AlchemyIndexerService {
   private async parseSwapEvents(transactions: TransactionData[]): Promise<SwapEvent[]> {
     const swaps: SwapEvent[] = [];
 
+    if (!transactions || transactions.length === 0) {
+      return swaps;
+    }
+
     // Uniswap V4 Swap event signature
     // Swap(address indexed sender, address indexed recipient, int256 amount0, int256 amount1, uint160 sqrtPriceX96, uint128 liquidity, int24 tick)
     const SWAP_EVENT_SIGNATURE = '0xc42079f94a6350d7e6235f29174924f928cc2ac818eb64fed8004e115fbcca67';
 
-    for (const tx of transactions) {
+    // Limit number of transactions to parse to prevent timeout
+    const maxTransactions = 100;
+    const transactionsToParse = transactions.slice(0, maxTransactions);
+
+    for (const tx of transactionsToParse) {
       try {
-        // Get transaction receipt to access logs
-        const receipt = await this.provider.getTransactionReceipt(tx.hash);
-        if (!receipt) continue;
+        // Get transaction receipt to access logs with timeout
+        const receipt = await Promise.race([
+          this.provider.getTransactionReceipt(tx.hash),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), 5000))
+        ]) as any;
+        
+        if (!receipt || !receipt.logs) continue;
 
         for (const log of receipt.logs) {
           // Check if this is a Swap event
@@ -367,8 +456,15 @@ export class AlchemyIndexerService {
             }
           }
         }
-      } catch (error) {
-        console.error(`Error fetching receipt for tx ${tx.hash}:`, error);
+      } catch (error: any) {
+        // Silently skip individual transaction errors to prevent one bad tx from breaking everything
+        if (!error.message?.includes('Timeout')) {
+          // Only log non-timeout errors to reduce noise
+          if (transactionsToParse.indexOf(tx) < 10) { // Only log first 10 errors
+            console.warn(`Error processing tx ${tx.hash}:`, error.message);
+          }
+        }
+        continue; // Continue processing other transactions
       }
     }
 
@@ -398,6 +494,11 @@ export class AlchemyIndexerService {
     toBlock?: number;
     excludeZeroValue?: boolean;
   }): Promise<any[]> {
+    // Return empty array if no API key (graceful degradation)
+    if (!this.apiKey || this.apiKey === 'placeholder') {
+      return [];
+    }
+
     try {
       const payload: any = {
         id: 1,
@@ -435,16 +536,34 @@ export class AlchemyIndexerService {
 
       payload.params[0] = apiParams;
 
-      const response = await this.axiosInstance.post('', payload);
+      const response = await Promise.race([
+        this.axiosInstance.post('', payload),
+        new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('Request timeout')), 30000)
+        )
+      ]) as any;
       
-      if (response.data.error) {
-        throw new Error(response.data.error.message || 'Alchemy API error');
+      if (response?.data?.error) {
+        const errorMsg = response.data.error.message || 'Alchemy API error';
+        // Don't throw for rate limits or temporary errors - just log and return empty
+        if (errorMsg.includes('rate limit') || errorMsg.includes('429')) {
+          console.warn('Alchemy API rate limit hit, returning empty results');
+          return [];
+        }
+        throw new Error(errorMsg);
       }
 
-      return response.data.result?.transfers || [];
+      return response?.data?.result?.transfers || [];
     } catch (error: any) {
-      console.error('Alchemy getAssetTransfers error:', error.message);
-      // Return empty array on error instead of throwing
+      // Handle specific error types gracefully
+      if (error.code === 'ECONNABORTED' || error.message?.includes('timeout')) {
+        console.warn('Alchemy API request timeout, returning empty results');
+      } else if (error.response?.status === 429) {
+        console.warn('Alchemy API rate limit, returning empty results');
+      } else {
+        console.error('Alchemy getAssetTransfers error:', error.message || error);
+      }
+      // Return empty array on error instead of throwing (graceful degradation)
       return [];
     }
   }
