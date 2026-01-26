@@ -21,7 +21,7 @@ import {
   Star,
   TreePine,
   Sprout,
-  Seedling
+  Leaf
 } from 'lucide-react';
 import { clsx } from 'clsx';
 
@@ -369,8 +369,8 @@ function TierBadge({ tier }: { tier: string }) {
     Expert: Star,
     Intermediate: TreePine,
     Beginner: Sprout,
-    Novice: Seedling,
-  }[tier] || Seedling;
+    Novice: Leaf,
+  }[tier] || Leaf;
 
   return (
     <span className={clsx('px-3 py-1 rounded-full text-xs font-medium border flex items-center gap-1.5', tierClass)}>
