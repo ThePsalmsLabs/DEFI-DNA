@@ -1,8 +1,9 @@
-// Contract ABIs - imported from frontend or loaded from JSON
+// Contract ABIs - loaded from JSON files in backend/abi directory
 import * as path from 'path';
 import * as fs from 'fs';
 
-const abiPath = path.join(__dirname, '../../../frontend/src/abi');
+// Use backend/abi directory (available in Docker builds)
+const abiPath = path.join(__dirname, '../abi');
 export const DNASubscriberABI = JSON.parse(
   fs.readFileSync(path.join(abiPath, 'DNASubscriber.json'), 'utf-8')
 );
