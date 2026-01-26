@@ -38,11 +38,13 @@ try {
   const dnaReaderAddress = process.env.DNA_READER_ADDRESS || '';
 
   if (rpcUrl && dnaSubscriberAddress && dnaReaderAddress) {
+    const chainId = parseInt(process.env.CHAIN_ID || '8453'); // Base Mainnet default
     searchService = new SearchService(
       rpcUrl,
       dnaSubscriberAddress,
       dnaReaderAddress,
-      dbPool
+      dbPool,
+      chainId
     );
     console.log('✅ Search service initialized');
   } else {
