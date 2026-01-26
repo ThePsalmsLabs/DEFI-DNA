@@ -3,7 +3,7 @@
 import { motion } from 'framer-motion';
 import Link from 'next/link';
 import { useAccount } from 'wagmi';
-import { ArrowRight, Dna, Trophy, TrendingUp, Users, Search, Waves, Star, TreePine, Sprout, Seedling } from 'lucide-react';
+import { ArrowRight, Dna, Trophy, TrendingUp, Users, Search, Waves, Star, TreePine, Sprout, Leaf } from 'lucide-react';
 import { ConnectButton } from '@/components/wallet/ConnectButton';
 
 export default function HomePage() {
@@ -270,7 +270,7 @@ const scoreComponents = [
 ];
 
 const tiers = [
-  { name: 'Novice', range: '0-19', icon: Seedling, class: 'tier-novice' },
+  { name: 'Novice', range: '0-19', icon: Leaf, class: 'tier-novice' },
   { name: 'Beginner', range: '20-39', icon: Sprout, class: 'tier-beginner' },
   { name: 'Intermediate', range: '40-59', icon: TreePine, class: 'tier-intermediate' },
   { name: 'Expert', range: '60-79', icon: Star, class: 'tier-expert' },
