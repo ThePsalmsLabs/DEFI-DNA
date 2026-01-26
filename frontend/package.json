@@ -4,21 +4,23 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "dev:turbo": "next dev --turbopack",
+    "dev:webpack": "next dev --webpack",
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "next": "14.1.0",
-    "react": "^18.2.0",
-    "react-dom": "^18.2.0",
+    "next": "^16.0.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
     "wagmi": "^2.5.0",
     "viem": "^2.7.0",
     "@tanstack/react-query": "^5.17.0",
     "framer-motion": "^11.0.0",
     "recharts": "^2.10.0",
-    "lucide-react": "^0.312.0",
+    "lucide-react": "^0.484.0",
     "clsx": "^2.1.0",
     "tailwind-merge": "^2.2.0",
     "@radix-ui/react-dialog": "^1.0.5",
@@ -29,15 +31,19 @@
     "date-fns": "^3.2.0"
   },
   "devDependencies": {
-    "@types/node": "^20.11.0",
-    "@types/react": "^18.2.47",
-    "@types/react-dom": "^18.2.18",
-    "typescript": "^5.3.3",
+    "@types/node": "^22.0.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "typescript": "^5.6.0",
     "tailwindcss": "^3.4.1",
     "postcss": "^8.4.33",
     "autoprefixer": "^10.4.17",
-    "eslint": "^8.56.0",
-    "eslint-config-next": "14.1.0"
+    "eslint": "^9.0.0",
+    "eslint-config-next": "^16.0.0"
+  },
+  "overrides": {
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
   }
 }
 
