@@ -2,7 +2,7 @@
 
 import { motion } from 'framer-motion';
 import { clsx } from 'clsx';
-import { Waves, Star, TreePine, Sprout, Seedling } from 'lucide-react';
+import { Waves, Star, TreePine, Sprout, Leaf } from 'lucide-react';
 
 interface DNAScoreCardProps {
   score: number;
@@ -155,7 +155,7 @@ function getTierConfig(tier: string) {
       return {
         gradient: 'from-gray-500 to-gray-600',
         badge: 'bg-gray-500/20 text-gray-100 border-gray-400/30',
-        icon: Seedling,
+        icon: Leaf,
       };
   }
 }
