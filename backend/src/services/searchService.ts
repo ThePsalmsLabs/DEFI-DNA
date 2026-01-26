@@ -48,10 +48,23 @@ interface WalletSearchResult {
   }>;
 }
 
+// PositionManager ABI (ERC721 + PositionManager functions)
+const POSITION_MANAGER_ABI = [
+  'function ownerOf(uint256 tokenId) view returns (address)',
+  'function balanceOf(address owner) view returns (uint256)',
+  'function getPoolAndPositionInfo(uint256 tokenId) view returns (tuple, uint256)',
+  'function getPositionLiquidity(uint256 tokenId) view returns (uint128)',
+  'event Transfer(address indexed from, address indexed to, uint256 indexed tokenId)',
+];
+
+// Base Mainnet PositionManager address
+const BASE_POSITION_MANAGER = '0xbD216513d74C8cf14cf4747E6AaA6420FF64ee9e';
+
 export class SearchService {
   private provider: ethers.JsonRpcProvider;
   private dnaSubscriber: ethers.Contract;
   private dnaReader: ethers.Contract;
+  private positionManager: ethers.Contract;
   private db?: Pool;
 
   constructor(
@@ -71,6 +84,12 @@ export class SearchService {
       DNAReaderABI,
       this.provider
     );
+    // Initialize PositionManager contract
+    this.positionManager = new ethers.Contract(
+      BASE_POSITION_MANAGER,
+      POSITION_MANAGER_ABI,
+      this.provider
+    );
     this.db = dbPool;
   }
 
@@ -85,13 +104,13 @@ export class SearchService {
 
     const normalizedAddress = ethers.getAddress(walletAddress);
 
-    // Fetch on-chain data from DNASubscriber
+    // Fetch on-chain data from DNASubscriber (may be empty if not subscribed)
     const onChainData = await this.fetchOnChainData(normalizedAddress);
 
     // Fetch database data if available
     const dbData = this.db ? await this.fetchDatabaseData(normalizedAddress) : null;
 
-    // Fetch position details
+    // Fetch position details (from both DNASubscriber and PositionManager)
     const positions = await this.fetchPositions(normalizedAddress);
 
     // Aggregate pool interactions
@@ -102,9 +121,22 @@ export class SearchService {
       positions
     );
 
-    // Calculate DNA score and tier
+    // Calculate DNA score and tier (from DNASubscriber if available)
     const dnaScore = await this.calculateDNAScore(normalizedAddress);
     const tier = await this.getTier(normalizedAddress);
+
+    // Calculate actual position counts from fetched positions
+    const totalPositions = positions.length;
+    const activePositions = positions.filter(p => p.isActive).length;
+    
+    // Extract unique pools from positions
+    const uniquePoolsSet = new Set<string>();
+    positions.forEach(p => {
+      if (p.poolId && p.poolId !== '0x0000000000000000000000000000000000000000000000000000000000000000') {
+        uniquePoolsSet.add(p.poolId.toLowerCase());
+      }
+    });
+    const uniquePools = uniquePoolsSet.size;
 
     return {
       address: normalizedAddress,
@@ -112,9 +144,9 @@ export class SearchService {
         totalSwaps: Number(onChainData.totalSwaps) || 0,
         totalVolumeUsd: Number(onChainData.totalVolumeUsd) / 1e18 || 0,
         totalFeesEarned: Number(onChainData.totalFeesEarned) / 1e18 || 0,
-        totalPositions: Number(onChainData.totalPositions) || 0,
-        activePositions: Number(onChainData.activePositions) || 0,
-        uniquePools: Number(onChainData.uniquePools) || 0,
+        totalPositions: totalPositions || Number(onChainData.totalPositions) || 0,
+        activePositions: activePositions || Number(onChainData.activePositions) || 0,
+        uniquePools: uniquePools || Number(onChainData.uniquePools) || 0,
         dnaScore: Number(dnaScore) || 0,
         tier: tier || 'Novice',
         firstActionTimestamp: Number(onChainData.firstActionTimestamp) || 0,
@@ -141,9 +173,17 @@ export class SearchService {
         firstActionTimestamp: stats.firstActionTimestamp,
         lastActionTimestamp: stats.lastActionTimestamp,
       };
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error fetching on-chain data:', error);
+      // Log more details for debugging
+      if (error.message) {
+        console.error('Error message:', error.message);
+      }
+      if (error.code) {
+        console.error('Error code:', error.code);
+      }
       // Return empty stats if contract call fails
+      // This is normal for wallets that haven't interacted with tracked contracts
       return {
         totalSwaps: 0n,
         totalVolumeUsd: 0n,
@@ -209,56 +249,152 @@ export class SearchService {
 
   /**
    * Fetch position details for the wallet
+   * First tries DNASubscriber (subscribed positions), then queries PositionManager directly
    */
   private async fetchPositions(address: string) {
+    const positions: any[] = [];
+    const tokenIdSet = new Set<string>();
+
+    // Step 1: Get positions from DNASubscriber (subscribed positions)
     try {
-      const tokenIds = await this.dnaSubscriber.getOwnerTokenIds(address);
+      const subscribedTokenIds = await this.dnaSubscriber.getOwnerTokenIds(address);
       
-      if (!tokenIds || tokenIds.length === 0) {
-        return [];
-      }
+      if (subscribedTokenIds && subscribedTokenIds.length > 0) {
+        for (let i = 0; i < Math.min(20, subscribedTokenIds.length); i++) {
+          try {
+            const tokenId = subscribedTokenIds[i].toString();
+            tokenIdSet.add(tokenId);
+            
+            const positionData = await this.dnaSubscriber.getPosition(subscribedTokenIds[i]);
+            
+            let poolIdHex = '0x';
+            if (Array.isArray(positionData.poolId)) {
+              poolIdHex = '0x' + positionData.poolId.map((b: number) => 
+                b.toString(16).padStart(2, '0')
+              ).join('');
+            } else if (typeof positionData.poolId === 'string') {
+              poolIdHex = positionData.poolId;
+            } else {
+              poolIdHex = '0x' + positionData.poolId.toString(16).padStart(64, '0');
+            }
 
-      // Fetch position snapshots - limit to first 20 for performance
-      const positions = [];
-      const maxPositions = Math.min(20, tokenIds.length);
-
-      for (let i = 0; i < maxPositions; i++) {
-        try {
-          const tokenId = tokenIds[i];
-          const positionData = await this.dnaSubscriber.getPosition(tokenId);
-          
-          // Convert poolId from bytes32 to hex string
-          let poolIdHex = '0x';
-          if (Array.isArray(positionData.poolId)) {
-            poolIdHex = '0x' + positionData.poolId.map((b: number) => 
-              b.toString(16).padStart(2, '0')
-            ).join('');
-          } else if (typeof positionData.poolId === 'string') {
-            poolIdHex = positionData.poolId;
-          } else {
-            // Handle BigNumber or other types
-            poolIdHex = '0x' + positionData.poolId.toString(16).padStart(64, '0');
+            positions.push({
+              tokenId,
+              poolId: poolIdHex,
+              liquidity: positionData.liquidity?.toString() || '0',
+              tickLower: Number(positionData.tickLower) || 0,
+              tickUpper: Number(positionData.tickUpper) || 0,
+              isActive: positionData.isActive || false,
+              isSubscribed: true,
+            });
+          } catch (error) {
+            console.error(`Error fetching subscribed position ${subscribedTokenIds[i]}:`, error);
           }
+        }
+      }
+    } catch (error) {
+      console.log('No subscribed positions found (this is normal if positions not subscribed)');
+    }
 
-          positions.push({
-            tokenId: tokenId.toString(),
-            poolId: poolIdHex,
-            liquidity: positionData.liquidity?.toString() || '0',
-            tickLower: Number(positionData.tickLower) || 0,
-            tickUpper: Number(positionData.tickUpper) || 0,
-            isActive: positionData.isActive || false,
-          });
-        } catch (error) {
-          console.error(`Error fetching position ${tokenIds[i]}:`, error);
-          // Continue with next position
+    // Step 2: Query PositionManager Transfer events to find ALL positions
+    try {
+      console.log(`Querying PositionManager events for ${address}...`);
+      
+      // Get Transfer events where this address received tokens (minted or transferred to)
+      const currentBlock = await this.provider.getBlockNumber();
+      // Query last 50k blocks (Base mainnet has ~2s block time, so ~28 days of history)
+      // Adjust this based on when Uniswap V4 launched on Base
+      const fromBlock = Math.max(0, currentBlock - 50000);
+      
+      const transferFilter = this.positionManager.filters.Transfer(null, address);
+      const transfers = await this.positionManager.queryFilter(transferFilter, fromBlock, 'latest');
+      
+      console.log(`Found ${transfers.length} Transfer events to ${address}`);
+
+      // Also check transfers FROM this address (to handle current ownership)
+      const fromTransfers = await this.positionManager.queryFilter(
+        this.positionManager.filters.Transfer(address, null),
+        fromBlock,
+        'latest'
+      );
+
+      // Build set of token IDs that were minted to or transferred to this address
+      const receivedTokenIds = new Set<string>();
+      for (const event of transfers) {
+        if ('args' in event && event.args && event.args.tokenId) {
+          receivedTokenIds.add(event.args.tokenId.toString());
         }
       }
 
-      return positions;
-    } catch (error) {
-      console.error('Error fetching positions:', error);
-      return [];
+      // Remove tokens that were transferred away
+      for (const event of fromTransfers) {
+        if ('args' in event && event.args && event.args.to && event.args.to.toLowerCase() !== address.toLowerCase()) {
+          receivedTokenIds.delete(event.args.tokenId.toString());
+        }
+      }
+
+      console.log(`Found ${receivedTokenIds.size} unique positions for ${address}`);
+
+      // Fetch details for positions not already in our list
+      let fetchedCount = 0;
+      const maxToFetch = 20; // Limit for performance
+
+      for (const tokenIdStr of receivedTokenIds) {
+        if (tokenIdSet.has(tokenIdStr) || fetchedCount >= maxToFetch) {
+          continue;
+        }
+
+        try {
+          // Verify current ownership
+          const currentOwner = await this.positionManager.ownerOf(tokenIdStr);
+          if (currentOwner.toLowerCase() !== address.toLowerCase()) {
+            continue; // Not owned by this address anymore
+          }
+
+          // Use DNAReader to get position snapshot (includes poolId computation)
+          const snapshot = await this.dnaReader.getPositionSnapshot(tokenIdStr);
+          
+          if (snapshot.owner && snapshot.owner.toLowerCase() === address.toLowerCase()) {
+            // Convert poolId bytes32 to hex string
+            let poolIdHex = '0x';
+            if (typeof snapshot.poolId === 'string') {
+              poolIdHex = snapshot.poolId.startsWith('0x') 
+                ? snapshot.poolId 
+                : '0x' + snapshot.poolId;
+            } else if (snapshot.poolId) {
+              // Handle BigNumber or other types
+              const poolIdStr = snapshot.poolId.toString();
+              poolIdHex = poolIdStr.startsWith('0x') 
+                ? poolIdStr 
+                : '0x' + poolIdStr.padStart(64, '0');
+            }
+
+            positions.push({
+              tokenId: tokenIdStr,
+              poolId: poolIdHex,
+              liquidity: snapshot.liquidity?.toString() || '0',
+              tickLower: Number(snapshot.tickLower) || 0,
+              tickUpper: Number(snapshot.tickUpper) || 0,
+              isActive: snapshot.isInRange || false,
+              isSubscribed: tokenIdSet.has(tokenIdStr),
+            });
+            fetchedCount++;
+          }
+        } catch (error: any) {
+          // Position might not exist or be invalid, skip it
+          if (!error.message?.includes('ERC721: invalid token ID')) {
+            console.error(`Error fetching position ${tokenIdStr}:`, error.message);
+          }
+        }
+      }
+
+      console.log(`Fetched ${fetchedCount} additional positions from PositionManager`);
+    } catch (error: any) {
+      console.error('Error querying PositionManager events:', error.message);
+      // Continue with subscribed positions only
     }
+
+    return positions;
   }
 
   /**
