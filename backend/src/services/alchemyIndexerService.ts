@@ -574,11 +574,8 @@ export class AlchemyIndexerService {
 
   /**
    * Get the block number when Uniswap V4 was deployed on Base
-   * CRITICAL-4: Returns the actual deployment block for full historical queries
    */
   async getUniswapV4DeploymentBlock(): Promise<number> {
-    // Return the known deployment block
-    // Uniswap V4 PositionManager was deployed on Base Mainnet at block 14,506,421 (May 2024)
     return this.UNISWAP_V4_DEPLOYMENT_BLOCK;
   }
 }
