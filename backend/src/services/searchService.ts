@@ -1,6 +1,17 @@
 import { ethers } from 'ethers';
 import { Pool } from 'pg';
 import { DNASubscriberABI, DNAReaderABI } from '../types/contracts';
+import { AlchemyIndexerService, IndexedWalletData } from './alchemyIndexerService';
+import * as dbQueries from '../db/queries';
+import type {
+  Position,
+  OnChainUserStats,
+  DatabaseUserData,
+  SubscribedPositionData,
+  PositionSnapshot,
+  TransferEvent,
+  AppError,
+} from '../types';
 
 interface PoolInteraction {
   poolId: string;
@@ -60,107 +71,363 @@ const POSITION_MANAGER_ABI = [
 // Base Mainnet PositionManager address
 const BASE_POSITION_MANAGER = '0xbD216513d74C8cf14cf4747E6AaA6420FF64ee9e';
 
+// Uniswap V4 deployment block on Base Mainnet (May 2024)
+// This is when Uniswap V4 PositionManager was deployed
+const UNISWAP_V4_DEPLOYMENT_BLOCK = 14506421;
+
 export class SearchService {
   private provider: ethers.JsonRpcProvider;
   private dnaSubscriber: ethers.Contract;
   private dnaReader: ethers.Contract;
   private positionManager: ethers.Contract;
   private db?: Pool;
+  private indexer?: AlchemyIndexerService;
+  private chainId: number;
 
   constructor(
     rpcUrl: string,
     dnaSubscriberAddress: string,
     dnaReaderAddress: string,
-    dbPool?: Pool
+    dbPool?: Pool,
+    chainId: number = 8453 // Base Mainnet
   ) {
-    this.provider = new ethers.JsonRpcProvider(rpcUrl);
-    this.dnaSubscriber = new ethers.Contract(
-      dnaSubscriberAddress,
-      DNASubscriberABI,
-      this.provider
-    );
-    this.dnaReader = new ethers.Contract(
-      dnaReaderAddress,
-      DNAReaderABI,
-      this.provider
-    );
-    // Initialize PositionManager contract
-    this.positionManager = new ethers.Contract(
-      BASE_POSITION_MANAGER,
-      POSITION_MANAGER_ABI,
-      this.provider
-    );
+    // Validate inputs
+    if (!rpcUrl || typeof rpcUrl !== 'string') {
+      throw new Error('Invalid RPC URL provided to SearchService');
+    }
+    if (!dnaSubscriberAddress || !ethers.isAddress(dnaSubscriberAddress)) {
+      throw new Error('Invalid DNA_SUBSCRIBER_ADDRESS provided');
+    }
+    if (!dnaReaderAddress || !ethers.isAddress(dnaReaderAddress)) {
+      throw new Error('Invalid DNA_READER_ADDRESS provided');
+    }
+
+    try {
+      this.provider = new ethers.JsonRpcProvider(rpcUrl);
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      throw new Error(`Failed to initialize blockchain provider: ${errorMessage}`);
+    }
+
+    this.chainId = chainId;
+
+    // Initialize contracts with error handling
+    try {
+      this.dnaSubscriber = new ethers.Contract(
+        dnaSubscriberAddress,
+        DNASubscriberABI,
+        this.provider
+      );
+      this.dnaReader = new ethers.Contract(
+        dnaReaderAddress,
+        DNAReaderABI,
+        this.provider
+      );
+      // Initialize PositionManager contract
+      this.positionManager = new ethers.Contract(
+        BASE_POSITION_MANAGER,
+        POSITION_MANAGER_ABI,
+        this.provider
+      );
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      throw new Error(`Failed to initialize contracts: ${errorMessage}`);
+    }
+
     this.db = dbPool;
+
+    // Initialize Alchemy indexer if RPC URL contains Alchemy API key
+    if (rpcUrl.includes('alchemy.com')) {
+      try {
+        this.indexer = new AlchemyIndexerService(rpcUrl, chainId);
+        console.log('✅ Alchemy indexer initialized');
+      } catch (error: unknown) {
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        console.warn('⚠️ Failed to initialize Alchemy indexer:', errorMessage);
+        this.indexer = undefined;
+      }
+    }
   }
 
   /**
    * Search for wallet interactions across all pools
    */
   async searchWallet(walletAddress: string): Promise<WalletSearchResult> {
-    // Validate address
     if (!ethers.isAddress(walletAddress)) {
       throw new Error('Invalid wallet address');
     }
 
     const normalizedAddress = ethers.getAddress(walletAddress);
 
-    // Fetch on-chain data from DNASubscriber (may be empty if not subscribed)
-    const onChainData = await this.fetchOnChainData(normalizedAddress);
+    // Check database cache first
+    if (this.db) {
+      try {
+        const cachedUser = await dbQueries.getUser(this.db, normalizedAddress);
+        
+        if (cachedUser) {
+          const cacheAge = Date.now() - new Date(cachedUser.updated_at).getTime();
+          const cacheMaxAge = 5 * 60 * 1000;
+          
+          if (cacheAge < cacheMaxAge) {
+            const poolInteractions = await this.getPoolInteractionsFromDB(normalizedAddress);
+            const recentActivity = await this.getRecentActivityFromDB(normalizedAddress);
+            
+            return {
+              address: normalizedAddress,
+              summary: {
+                totalSwaps: cachedUser.total_swaps || 0,
+                totalVolumeUsd: Number(cachedUser.total_volume_usd) || 0,
+                totalFeesEarned: Number(cachedUser.total_fees_earned) || 0,
+                totalPositions: cachedUser.total_positions || 0,
+                activePositions: cachedUser.active_positions || 0,
+                uniquePools: cachedUser.unique_pools || 0,
+                dnaScore: cachedUser.dna_score || 0,
+                tier: cachedUser.tier || 'Novice',
+                firstActionTimestamp: cachedUser.first_action_timestamp ? Number(cachedUser.first_action_timestamp) : 0,
+                lastActionTimestamp: cachedUser.last_action_timestamp ? Number(cachedUser.last_action_timestamp) : 0,
+              },
+              poolInteractions,
+              recentActivity,
+            };
+          }
+        }
+      } catch (error: unknown) {
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        console.error('Error fetching cached data:', errorMessage);
+      }
+    }
 
-    // Fetch database data if available
+    // Fetch fresh data
+    const onChainData = await this.fetchOnChainData(normalizedAddress);
     const dbData = this.db ? await this.fetchDatabaseData(normalizedAddress) : null;
 
-    // Fetch position details (from both DNASubscriber and PositionManager)
-    const positions = await this.fetchPositions(normalizedAddress);
+    // Fetch indexed data from Alchemy
+    let indexedData: IndexedWalletData | null = null;
+    if (this.indexer) {
+      try {
+        const deploymentBlock = await this.indexer.getUniswapV4DeploymentBlock();
+        const currentBlock = await this.provider.getBlockNumber();
+        
+        indexedData = await this.indexer.getWalletData(
+          normalizedAddress,
+          deploymentBlock,
+          currentBlock
+        );
+      } catch (error: unknown) {
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        console.error('Error fetching indexed data:', errorMessage);
+      }
+    }
 
-    // Aggregate pool interactions
+    const positions = await this.fetchPositions(normalizedAddress, indexedData);
+
     const poolInteractions = await this.aggregatePoolInteractions(
       normalizedAddress,
       onChainData,
       dbData,
-      positions
+      positions,
+      indexedData
     );
 
-    // Calculate DNA score and tier (from DNASubscriber if available)
     const dnaScore = await this.calculateDNAScore(normalizedAddress);
     const tier = await this.getTier(normalizedAddress);
 
-    // Calculate actual position counts from fetched positions
     const totalPositions = positions.length;
     const activePositions = positions.filter(p => p.isActive).length;
     
-    // Extract unique pools from positions
     const uniquePoolsSet = new Set<string>();
     positions.forEach(p => {
       if (p.poolId && p.poolId !== '0x0000000000000000000000000000000000000000000000000000000000000000') {
         uniquePoolsSet.add(p.poolId.toLowerCase());
       }
     });
+    if (indexedData) {
+      indexedData.swaps.forEach(swap => {
+        if (swap.poolId) {
+          uniquePoolsSet.add(swap.poolId.toLowerCase());
+        }
+      });
+    }
     const uniquePools = uniquePoolsSet.size;
 
-    return {
+    const totalSwaps = indexedData 
+      ? indexedData.swaps.length 
+      : (Number(onChainData.totalSwaps) || 0);
+    
+    const totalVolumeUsd = indexedData && indexedData.swaps.length > 0
+      ? this.calculateVolumeFromSwaps(indexedData.swaps)
+      : (Number(onChainData.totalVolumeUsd) / 1e18 || 0);
+
+    const firstActionTimestamp = indexedData && indexedData.firstTransactionTimestamp > 0
+      ? indexedData.firstTransactionTimestamp
+      : (Number(onChainData.firstActionTimestamp) || 0);
+    
+    const lastActionTimestamp = indexedData && indexedData.lastTransactionTimestamp > 0
+      ? indexedData.lastTransactionTimestamp
+      : (Number(onChainData.lastActionTimestamp) || 0);
+
+    const recentActivity = indexedData 
+      ? this.buildRecentActivityFromIndexedData(indexedData)
+      : (dbData?.recentActivity || undefined);
+
+    const result: WalletSearchResult = {
       address: normalizedAddress,
       summary: {
-        totalSwaps: Number(onChainData.totalSwaps) || 0,
-        totalVolumeUsd: Number(onChainData.totalVolumeUsd) / 1e18 || 0,
+        totalSwaps,
+        totalVolumeUsd,
         totalFeesEarned: Number(onChainData.totalFeesEarned) / 1e18 || 0,
         totalPositions: totalPositions || Number(onChainData.totalPositions) || 0,
         activePositions: activePositions || Number(onChainData.activePositions) || 0,
         uniquePools: uniquePools || Number(onChainData.uniquePools) || 0,
         dnaScore: Number(dnaScore) || 0,
         tier: tier || 'Novice',
-        firstActionTimestamp: Number(onChainData.firstActionTimestamp) || 0,
-        lastActionTimestamp: Number(onChainData.lastActionTimestamp) || 0,
+        firstActionTimestamp,
+        lastActionTimestamp,
       },
       poolInteractions,
-      recentActivity: dbData?.recentActivity || undefined,
+      recentActivity,
     };
+
+    // Save to database for caching
+    if (this.db) {
+      try {
+        await this.saveToDatabase(normalizedAddress, result, positions);
+        console.log(`✅ Saved data to database for ${normalizedAddress}`);
+      } catch (error: unknown) {
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        console.error('Error saving to database:', errorMessage);
+      }
+    }
+
+    return result;
+  }
+
+  /**
+   * Save wallet data to database
+   */
+  private async saveToDatabase(
+    address: string,
+    result: WalletSearchResult,
+    positions: Position[]
+  ): Promise<void> {
+    if (!this.db) return;
+
+    try {
+      // Save user summary
+      await dbQueries.upsertUser(this.db, address, {
+        dnaScore: result.summary.dnaScore,
+        tier: result.summary.tier,
+        totalSwaps: result.summary.totalSwaps,
+        totalVolumeUsd: result.summary.totalVolumeUsd,
+        totalFeesEarned: result.summary.totalFeesEarned,
+        totalPositions: result.summary.totalPositions,
+        activePositions: result.summary.activePositions,
+        uniquePools: result.summary.uniquePools,
+        firstActionTimestamp: result.summary.firstActionTimestamp || undefined,
+        lastActionTimestamp: result.summary.lastActionTimestamp || undefined,
+      });
+
+      // Save positions
+      for (const position of positions) {
+        await dbQueries.upsertPosition(this.db, {
+          tokenId: position.tokenId,
+          ownerAddress: address,
+          poolId: position.poolId,
+          liquidity: position.liquidity,
+          tickLower: position.tickLower,
+          tickUpper: position.tickUpper,
+          isActive: position.isActive,
+          isSubscribed: position.isSubscribed || false,
+        });
+      }
+
+      // Save pool interactions
+      for (const interaction of result.poolInteractions) {
+        await dbQueries.upsertPoolInteraction(this.db, {
+          userAddress: address,
+          poolId: interaction.poolId,
+          totalSwaps: interaction.totalSwaps,
+          totalVolumeUsd: interaction.totalVolumeUsd,
+          totalFeesEarned: interaction.totalFeesEarned,
+          firstInteraction: interaction.firstInteraction || undefined,
+          lastInteraction: interaction.lastInteraction || undefined,
+        });
+      }
+
+      // Save recent activity
+      if (result.recentActivity) {
+        for (const activity of result.recentActivity.slice(0, 50)) {
+          await dbQueries.insertUserAction(this.db, {
+            address,
+            actionType: activity.type,
+            poolId: activity.poolId,
+            txHash: activity.txHash,
+            timestamp: activity.timestamp,
+          });
+        }
+      }
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      console.error('Error in saveToDatabase:', errorMessage);
+      throw error;
+    }
+  }
+
+  /**
+   * Get pool interactions from database
+   */
+  private async getPoolInteractionsFromDB(address: string): Promise<PoolInteraction[]> {
+    if (!this.db) return [];
+
+    try {
+      const dbInteractions = await dbQueries.getUserPoolInteractions(this.db, address);
+      
+      return dbInteractions.map(interaction => ({
+        poolId: interaction.pool_id,
+        totalSwaps: interaction.total_swaps,
+        totalVolumeUsd: Number(interaction.total_volume_usd) || 0,
+        totalFeesEarned: Number(interaction.total_fees_earned) || 0,
+        firstInteraction: interaction.first_interaction ? Number(interaction.first_interaction) : 0,
+        lastInteraction: interaction.last_interaction ? Number(interaction.last_interaction) : 0,
+      }));
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      console.error('Error fetching pool interactions from DB:', errorMessage);
+      return [];
+    }
+  }
+
+  /**
+   * Get recent activity from database
+   */
+  private async getRecentActivityFromDB(address: string): Promise<Array<{
+    type: 'swap' | 'mint' | 'burn' | 'collect';
+    poolId: string;
+    timestamp: number;
+    txHash?: string;
+  }>> {
+    if (!this.db) return [];
+
+    try {
+      const actions = await dbQueries.getRecentUserActions(this.db, address, 50);
+      
+      return actions.map(action => ({
+        type: action.action_type as 'swap' | 'mint' | 'burn' | 'collect',
+        poolId: action.pool_id || '',
+        timestamp: Number(action.timestamp),
+        txHash: action.tx_hash || undefined,
+      }));
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      console.error('Error fetching recent activity from DB:', errorMessage);
+      return [];
+    }
   }
 
   /**
    * Fetch on-chain user stats from DNASubscriber
    */
-  private async fetchOnChainData(address: string) {
+  private async fetchOnChainData(address: string): Promise<OnChainUserStats> {
     try {
       const stats = await this.dnaSubscriber.getUserStats(address);
       return {
@@ -173,17 +440,15 @@ export class SearchService {
         firstActionTimestamp: stats.firstActionTimestamp,
         lastActionTimestamp: stats.lastActionTimestamp,
       };
-    } catch (error: any) {
-      console.error('Error fetching on-chain data:', error);
-      // Log more details for debugging
-      if (error.message) {
-        console.error('Error message:', error.message);
+    } catch (error: unknown) {
+      const appError = error as AppError;
+      console.error('Error fetching on-chain data:', appError);
+      if (appError.message) {
+        console.error('Error message:', appError.message);
       }
-      if (error.code) {
-        console.error('Error code:', error.code);
+      if (appError.code) {
+        console.error('Error code:', appError.code);
       }
-      // Return empty stats if contract call fails
-      // This is normal for wallets that haven't interacted with tracked contracts
       return {
         totalSwaps: 0n,
         totalVolumeUsd: 0n,
@@ -191,8 +456,8 @@ export class SearchService {
         totalPositions: 0,
         activePositions: 0,
         uniquePools: 0,
-        firstActionTimestamp: 0,
-        lastActionTimestamp: 0,
+        firstActionTimestamp: 0n,
+        lastActionTimestamp: 0n,
       };
     }
   }
@@ -200,7 +465,7 @@ export class SearchService {
   /**
    * Fetch historical data from database if available
    */
-  private async fetchDatabaseData(address: string) {
+  private async fetchDatabaseData(address: string): Promise<DatabaseUserData | null> {
     if (!this.db) return null;
 
     try {
@@ -249,13 +514,37 @@ export class SearchService {
 
   /**
    * Fetch position details for the wallet
-   * First tries DNASubscriber (subscribed positions), then queries PositionManager directly
    */
-  private async fetchPositions(address: string) {
-    const positions: any[] = [];
+  private async fetchPositions(address: string, indexedData?: IndexedWalletData | null): Promise<Position[]> {
+    const positions: Position[] = [];
     const tokenIdSet = new Set<string>();
 
-    // Step 1: Get positions from DNASubscriber (subscribed positions)
+    // Check database first
+    if (this.db) {
+      try {
+        const dbPositions = await dbQueries.getUserPositions(this.db, address);
+        console.log(`📊 Found ${dbPositions.length} positions in database for ${address}`);
+        
+        for (const dbPos of dbPositions) {
+          tokenIdSet.add(dbPos.token_id);
+          positions.push({
+            tokenId: dbPos.token_id,
+            poolId: dbPos.pool_id,
+            liquidity: dbPos.liquidity || '0',
+            tickLower: dbPos.tick_lower || 0,
+            tickUpper: dbPos.tick_upper || 0,
+            isActive: dbPos.is_active,
+            isSubscribed: dbPos.is_subscribed,
+            fromDatabase: true,
+          });
+        }
+      } catch (error: unknown) {
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        console.error('Error fetching positions from database:', errorMessage);
+      }
+    }
+
+    // Get positions from DNASubscriber
     try {
       const subscribedTokenIds = await this.dnaSubscriber.getOwnerTokenIds(address);
       
@@ -265,7 +554,7 @@ export class SearchService {
             const tokenId = subscribedTokenIds[i].toString();
             tokenIdSet.add(tokenId);
             
-            const positionData = await this.dnaSubscriber.getPosition(subscribedTokenIds[i]);
+            const positionData = await this.dnaSubscriber.getPosition(subscribedTokenIds[i]) as SubscribedPositionData;
             
             let poolIdHex = '0x';
             if (Array.isArray(positionData.poolId)) {
@@ -296,73 +585,30 @@ export class SearchService {
       console.log('No subscribed positions found (this is normal if positions not subscribed)');
     }
 
-    // Step 2: Query PositionManager Transfer events to find ALL positions
-    try {
-      console.log(`Querying PositionManager events for ${address}...`);
+    // Use indexed data
+    if (indexedData && indexedData.positions.length > 0) {
+      console.log(`Using indexed data: ${indexedData.positions.length} position transfers found`);
       
-      // Get Transfer events where this address received tokens (minted or transferred to)
-      const currentBlock = await this.provider.getBlockNumber();
-      // Query last 50k blocks (Base mainnet has ~2s block time, so ~28 days of history)
-      // Adjust this based on when Uniswap V4 launched on Base
-      const fromBlock = Math.max(0, currentBlock - 50000);
-      
-      const transferFilter = this.positionManager.filters.Transfer(null, address);
-      const transfers = await this.positionManager.queryFilter(transferFilter, fromBlock, 'latest');
-      
-      console.log(`Found ${transfers.length} Transfer events to ${address}`);
-
-      // Also check transfers FROM this address (to handle current ownership)
-      const fromTransfers = await this.positionManager.queryFilter(
-        this.positionManager.filters.Transfer(address, null),
-        fromBlock,
-        'latest'
-      );
-
-      // Build set of token IDs that were minted to or transferred to this address
-      const receivedTokenIds = new Set<string>();
-      for (const event of transfers) {
-        if ('args' in event && event.args && event.args.tokenId) {
-          receivedTokenIds.add(event.args.tokenId.toString());
-        }
-      }
-
-      // Remove tokens that were transferred away
-      for (const event of fromTransfers) {
-        if ('args' in event && event.args && event.args.to && event.args.to.toLowerCase() !== address.toLowerCase()) {
-          receivedTokenIds.delete(event.args.tokenId.toString());
-        }
-      }
-
-      console.log(`Found ${receivedTokenIds.size} unique positions for ${address}`);
-
-      // Fetch details for positions not already in our list
-      let fetchedCount = 0;
-      const maxToFetch = 20; // Limit for performance
-
-      for (const tokenIdStr of receivedTokenIds) {
-        if (tokenIdSet.has(tokenIdStr) || fetchedCount >= maxToFetch) {
+      for (const transfer of indexedData.positions) {
+        if (tokenIdSet.has(transfer.tokenId)) {
           continue;
         }
 
         try {
-          // Verify current ownership
-          const currentOwner = await this.positionManager.ownerOf(tokenIdStr);
+          const currentOwner = await this.positionManager.ownerOf(transfer.tokenId);
           if (currentOwner.toLowerCase() !== address.toLowerCase()) {
-            continue; // Not owned by this address anymore
+            continue;
           }
 
-          // Use DNAReader to get position snapshot (includes poolId computation)
-          const snapshot = await this.dnaReader.getPositionSnapshot(tokenIdStr);
+          const snapshot = await this.dnaReader.getPositionSnapshot(transfer.tokenId) as PositionSnapshot;
           
           if (snapshot.owner && snapshot.owner.toLowerCase() === address.toLowerCase()) {
-            // Convert poolId bytes32 to hex string
             let poolIdHex = '0x';
             if (typeof snapshot.poolId === 'string') {
               poolIdHex = snapshot.poolId.startsWith('0x') 
                 ? snapshot.poolId 
                 : '0x' + snapshot.poolId;
             } else if (snapshot.poolId) {
-              // Handle BigNumber or other types
               const poolIdStr = snapshot.poolId.toString();
               poolIdHex = poolIdStr.startsWith('0x') 
                 ? poolIdStr 
@@ -370,28 +616,140 @@ export class SearchService {
             }
 
             positions.push({
-              tokenId: tokenIdStr,
+              tokenId: transfer.tokenId,
               poolId: poolIdHex,
               liquidity: snapshot.liquidity?.toString() || '0',
               tickLower: Number(snapshot.tickLower) || 0,
               tickUpper: Number(snapshot.tickUpper) || 0,
               isActive: snapshot.isInRange || false,
-              isSubscribed: tokenIdSet.has(tokenIdStr),
+              isSubscribed: false,
             });
-            fetchedCount++;
+            tokenIdSet.add(transfer.tokenId);
           }
-        } catch (error: any) {
-          // Position might not exist or be invalid, skip it
-          if (!error.message?.includes('ERC721: invalid token ID')) {
-            console.error(`Error fetching position ${tokenIdStr}:`, error.message);
+        } catch (error: unknown) {
+          const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+          if (!errorMessage.includes('ERC721: invalid token ID')) {
+            console.error(`Error fetching indexed position ${transfer.tokenId}:`, errorMessage);
           }
         }
       }
+    }
 
-      console.log(`Fetched ${fetchedCount} additional positions from PositionManager`);
-    } catch (error: any) {
-      console.error('Error querying PositionManager events:', error.message);
-      // Continue with subscribed positions only
+    // Query blockchain if no positions found
+    if (positions.length === 0) {
+      try {
+        console.log(`Querying blockchain for ${address}...`);
+        
+        const currentBlock = await this.provider.getBlockNumber();
+        const fromBlock = UNISWAP_V4_DEPLOYMENT_BLOCK;
+        
+        console.log(`Querying blocks ${fromBlock} to ${currentBlock} (${currentBlock - fromBlock} blocks)`);
+      
+        const transferFilter = this.positionManager.filters.Transfer(null, address);
+        const CHUNK_SIZE = 50000;
+        let allTransfers: TransferEvent[] = [];
+        let allFromTransfers: TransferEvent[] = [];
+        
+        for (let chunkStart = fromBlock; chunkStart < currentBlock; chunkStart += CHUNK_SIZE) {
+          const chunkEnd = Math.min(chunkStart + CHUNK_SIZE, currentBlock);
+          
+          try {
+            console.log(`  Querying chunk: ${chunkStart} to ${chunkEnd}...`);
+            
+        const transfers = await this.positionManager.queryFilter(
+            transferFilter,
+            chunkStart,
+            chunkEnd
+          );
+          allTransfers.push(...(transfers as TransferEvent[]));
+          
+          const fromTransfers = await this.positionManager.queryFilter(
+            this.positionManager.filters.Transfer(address, null),
+            chunkStart,
+            chunkEnd
+          );
+          allFromTransfers.push(...(fromTransfers as TransferEvent[]));
+          } catch (error: unknown) {
+            const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+            console.error(`Error querying chunk ${chunkStart}-${chunkEnd}:`, errorMessage);
+          }
+        }
+        
+        console.log(`Found ${allTransfers.length} Transfer events to ${address}`);
+
+        const receivedTokenIds = new Set<string>();
+        for (const event of allTransfers) {
+          if (event.args && event.args.tokenId !== undefined) {
+            receivedTokenIds.add(String(event.args.tokenId));
+          }
+        }
+
+        for (const event of allFromTransfers) {
+          if (event.args && event.args.to && event.args.to.toLowerCase() !== address.toLowerCase() && event.args.tokenId !== undefined) {
+            receivedTokenIds.delete(String(event.args.tokenId));
+          }
+        }
+
+        console.log(`Found ${receivedTokenIds.size} unique positions for ${address}`);
+
+        let fetchedCount = 0;
+        const maxToFetch = 100;
+
+        for (const tokenIdStr of receivedTokenIds) {
+          if (tokenIdSet.has(tokenIdStr)) {
+            continue;
+          }
+          
+          if (fetchedCount >= maxToFetch) {
+            console.log(`⚠️ Reached fetch limit (${maxToFetch}), skipping remaining positions`);
+            break;
+          }
+
+          try {
+            const currentOwner = await this.positionManager.ownerOf(tokenIdStr);
+            if (currentOwner.toLowerCase() !== address.toLowerCase()) {
+              continue;
+            }
+
+            const snapshot = await this.dnaReader.getPositionSnapshot(tokenIdStr) as PositionSnapshot;
+            
+            if (snapshot.owner && snapshot.owner.toLowerCase() === address.toLowerCase()) {
+              let poolIdHex = '0x';
+              if (typeof snapshot.poolId === 'string') {
+                poolIdHex = snapshot.poolId.startsWith('0x') 
+                  ? snapshot.poolId 
+                  : '0x' + snapshot.poolId;
+              } else if (snapshot.poolId) {
+                const poolIdStr = snapshot.poolId.toString();
+                poolIdHex = poolIdStr.startsWith('0x') 
+                  ? poolIdStr 
+                  : '0x' + poolIdStr.padStart(64, '0');
+              }
+
+              positions.push({
+                tokenId: tokenIdStr,
+                poolId: poolIdHex,
+                liquidity: snapshot.liquidity?.toString() || '0',
+                tickLower: Number(snapshot.tickLower) || 0,
+                tickUpper: Number(snapshot.tickUpper) || 0,
+                isActive: snapshot.isInRange || false,
+                isSubscribed: tokenIdSet.has(tokenIdStr),
+              });
+              fetchedCount++;
+            }
+          } catch (error: unknown) {
+            const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+            if (!errorMessage.includes('ERC721: invalid token ID')) {
+              console.error(`Error fetching position ${tokenIdStr}:`, errorMessage);
+            }
+          }
+        }
+
+        console.log(`Fetched ${fetchedCount} additional positions from PositionManager`);
+      } catch (error: unknown) {
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        console.error('Error querying PositionManager events:', errorMessage);
+      }
     }
 
     return positions;
@@ -402,9 +760,10 @@ export class SearchService {
    */
   private async aggregatePoolInteractions(
     address: string,
-    onChainData: any,
-    dbData: any,
-    positions: any[]
+    onChainData: OnChainUserStats,
+    dbData: DatabaseUserData | null,
+    positions: Position[],
+    indexedData?: IndexedWalletData | null
   ): Promise<PoolInteraction[]> {
     const poolMap = new Map<string, PoolInteraction>();
 
@@ -454,25 +813,121 @@ export class SearchService {
         }
 
         const pool = poolMap.get(poolId)!;
-        pool.totalSwaps += parseInt(stat.swap_count) || 0;
-        pool.totalVolumeUsd += parseFloat(stat.total_volume) || 0;
+        const swapCount = parseInt(stat.swap_count, 10) || 0;
+        const totalVolume = parseFloat(stat.total_volume) || 0;
+        pool.totalSwaps += swapCount;
+        pool.totalVolumeUsd += totalVolume;
         
         if (stat.first_interaction) {
           const firstTs = new Date(stat.first_interaction).getTime() / 1000;
-          if (!pool.firstInteraction || firstTs < pool.firstInteraction) {
+          if (pool.firstInteraction === 0 || firstTs < pool.firstInteraction) {
             pool.firstInteraction = firstTs;
           }
         }
         if (stat.last_interaction) {
           const lastTs = new Date(stat.last_interaction).getTime() / 1000;
-          if (!pool.lastInteraction || lastTs > pool.lastInteraction) {
+          if (lastTs > pool.lastInteraction) {
             pool.lastInteraction = lastTs;
           }
         }
       }
     }
 
+    if (indexedData && indexedData.swaps.length > 0) {
+      for (const swap of indexedData.swaps) {
+        const poolId = swap.poolId.toLowerCase();
+        if (!poolId || poolId === '0x0000000000000000000000000000000000000000000000000000000000000000') {
+          continue;
+        }
+
+        if (!poolMap.has(poolId)) {
+          poolMap.set(poolId, {
+            poolId,
+            totalSwaps: 0,
+            totalVolumeUsd: 0,
+            totalFeesEarned: 0,
+            firstInteraction: 0,
+            lastInteraction: 0,
+          });
+        }
+
+        const pool = poolMap.get(poolId)!;
+        pool.totalSwaps += 1;
+        
+        const volume = (Number(swap.amount0) + Number(swap.amount1)) / 1e18;
+        pool.totalVolumeUsd += Math.abs(volume);
+        
+        if (swap.timestamp > 0) {
+          if (!pool.firstInteraction || swap.timestamp < pool.firstInteraction) {
+            pool.firstInteraction = swap.timestamp;
+          }
+          if (swap.timestamp > pool.lastInteraction) {
+            pool.lastInteraction = swap.timestamp;
+          }
+        }
+      }
+    }
+
     return Array.from(poolMap.values());
+  }
+
+  /**
+   * Calculate total volume from swap events
+   */
+  private calculateVolumeFromSwaps(swaps: Array<{ amount0: bigint; amount1: bigint }>): number {
+    let totalVolume = 0;
+    for (const swap of swaps) {
+      const volume0 = Math.abs(Number(swap.amount0)) / 1e18;
+      const volume1 = Math.abs(Number(swap.amount1)) / 1e18;
+      totalVolume += Math.max(volume0, volume1);
+    }
+    return totalVolume;
+  }
+
+  /**
+   * Build recent activity array from indexed data
+   */
+  private buildRecentActivityFromIndexedData(indexedData: IndexedWalletData): Array<{
+    type: 'swap' | 'mint' | 'burn' | 'collect';
+    poolId: string;
+    timestamp: number;
+    txHash?: string;
+  }> {
+    const activity: Array<{
+      type: 'swap' | 'mint' | 'burn' | 'collect';
+      poolId: string;
+      timestamp: number;
+      txHash?: string;
+    }> = [];
+
+    for (const swap of indexedData.swaps.slice(0, 20)) {
+      activity.push({
+        type: 'swap',
+        poolId: swap.poolId,
+        timestamp: swap.timestamp,
+        txHash: swap.txHash,
+      });
+    }
+
+    for (const position of indexedData.positions.filter(p => p.type === 'mint').slice(0, 10)) {
+      activity.push({
+        type: 'mint',
+        poolId: '',
+        timestamp: position.timestamp,
+        txHash: position.txHash,
+      });
+    }
+
+    for (const position of indexedData.positions.filter(p => p.type === 'burn').slice(0, 10)) {
+      activity.push({
+        type: 'burn',
+        poolId: '',
+        timestamp: position.timestamp,
+        txHash: position.txHash,
+      });
+    }
+
+    return activity.sort((a, b) => b.timestamp - a.timestamp).slice(0, 50);
   }
 
   /**

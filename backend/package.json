@@ -10,7 +10,8 @@
     "start:prod": "NODE_ENV=production node dist/index.js",
     "lint": "eslint src/**/*.ts",
     "typecheck": "tsc --noEmit",
-    "migrate": "node dist/migrations/migrate.js",
+    "migrate": "npm run build && node dist/db/migrate.js",
+    "migrate:dev": "ts-node src/db/migrate.ts",
     "seed": "node dist/migrations/seed.js"
   },
   "keywords": [

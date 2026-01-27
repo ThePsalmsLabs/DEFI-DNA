@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { motion } from 'framer-motion';
 import { useQuery } from '@tanstack/react-query';
-import { Search, Loader2, AlertCircle, ExternalLink, TrendingUp, DollarSign, Activity, Layers, Waves, Star, TreePine, Sprout, Seedling } from 'lucide-react';
+import { Search, Loader2, AlertCircle, ExternalLink, TrendingUp, DollarSign, Activity, Layers, Waves, Star, TreePine, Sprout, Leaf } from 'lucide-react';
 import Link from 'next/link';
 import { WalletSearchResult } from '@/types/search';
 import { clsx } from 'clsx';
@@ -365,8 +365,8 @@ function TierBadge({ tier }: { tier: string }) {
     Expert: { icon: Star, class: 'tier-expert' },
     Intermediate: { icon: TreePine, class: 'tier-intermediate' },
     Beginner: { icon: Sprout, class: 'tier-beginner' },
-    Novice: { icon: Seedling, class: 'tier-novice' },
-  }[tier] || { icon: Seedling, class: 'tier-novice' };
+    Novice: { icon: Leaf, class: 'tier-novice' },
+  }[tier] || { icon: Leaf, class: 'tier-novice' };
 
   const TierIcon = tierConfig.icon;
 
