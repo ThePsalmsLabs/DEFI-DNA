@@ -1,5 +1,6 @@
-import axios, { AxiosInstance } from 'axios';
+import axios, { AxiosInstance, AxiosError } from 'axios';
 import { ethers } from 'ethers';
+import type { AlchemyTransfer, AlchemyJsonRpcResponse, AppError } from '../types';
 
 /**
  * Alchemy Indexer Service
@@ -158,27 +159,27 @@ export class AlchemyIndexerService {
     let positions: PositionTransfer[] = [];
     try {
       positions = await this.getPositionTransfers(normalizedAddress, fromBlock, toBlock);
-    } catch (error: any) {
-      console.error('Error fetching position transfers:', error.message);
-      // Continue with empty positions
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      console.error('Error fetching position transfers:', errorMessage);
     }
 
     // Fetch all transactions to find swaps and other interactions with error handling
     let transactions: TransactionData[] = [];
     try {
       transactions = await this.getTransactions(normalizedAddress, fromBlock, toBlock);
-    } catch (error: any) {
-      console.error('Error fetching transactions:', error.message);
-      // Continue with empty transactions
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      console.error('Error fetching transactions:', errorMessage);
     }
 
     // Parse swap events from transaction logs with error handling
     let swaps: SwapEvent[] = [];
     try {
       swaps = await this.parseSwapEvents(transactions);
-    } catch (error: any) {
-      console.error('Error parsing swap events:', error.message);
-      // Continue with empty swaps
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      console.error('Error parsing swap events:', errorMessage);
     }
 
     // Calculate first/last transaction timestamps
@@ -197,24 +198,24 @@ export class AlchemyIndexerService {
       try {
         const firstBlockData = await Promise.race([
           this.provider.getBlock(firstBlock),
-          new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), 10000))
-        ]) as any;
+          new Promise<never>((_, reject) => setTimeout(() => reject(new Error('Timeout')), 10000))
+        ]);
         firstTimestamp = firstBlockData?.timestamp || 0;
-      } catch (error: any) {
-        console.error(`Error fetching first block ${firstBlock} timestamp:`, error.message);
-        // Continue without timestamp
+      } catch (error: unknown) {
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        console.error(`Error fetching first block ${firstBlock} timestamp:`, errorMessage);
       }
     }
     if (lastBlock > 0 && lastBlock !== firstBlock) {
       try {
         const lastBlockData = await Promise.race([
           this.provider.getBlock(lastBlock),
-          new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), 10000))
-        ]) as any;
+          new Promise<never>((_, reject) => setTimeout(() => reject(new Error('Timeout')), 10000))
+        ]);
         lastTimestamp = lastBlockData?.timestamp || 0;
-      } catch (error: any) {
-        console.error(`Error fetching last block ${lastBlock} timestamp:`, error.message);
-        // Continue without timestamp
+      } catch (error: unknown) {
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        console.error(`Error fetching last block ${lastBlock} timestamp:`, errorMessage);
       }
     } else if (lastBlock === firstBlock && firstTimestamp > 0) {
       lastTimestamp = firstTimestamp;
@@ -265,25 +266,25 @@ export class AlchemyIndexerService {
         toBlock,
       });
 
-      // Process transfers TO address
       for (const transfer of toTransfers) {
-        // Alchemy returns tokenId as string or in tokenIds array
         const tokenId = transfer.tokenId || (transfer.tokenIds && transfer.tokenIds[0]);
         if (tokenId) {
-          // Parse block number (can be hex string or number)
           let blockNum = 0;
           if (transfer.blockNum) {
             blockNum = typeof transfer.blockNum === 'string' 
               ? parseInt(transfer.blockNum, 16) 
-              : transfer.blockNum;
+              : Number(transfer.blockNum);
           }
 
-          // Parse timestamp
           let timestamp = 0;
           if (transfer.blockTimestamp) {
-            timestamp = typeof transfer.blockTimestamp === 'string'
-              ? new Date(transfer.blockTimestamp).getTime() / 1000
-              : transfer.blockTimestamp;
+            if (typeof transfer.blockTimestamp === 'string') {
+              timestamp = new Date(transfer.blockTimestamp).getTime() / 1000;
+            } else if (transfer.blockTimestamp instanceof Date) {
+              timestamp = transfer.blockTimestamp.getTime() / 1000;
+            } else {
+              timestamp = Number(transfer.blockTimestamp);
+            }
           }
 
           transfers.push({
@@ -298,7 +299,6 @@ export class AlchemyIndexerService {
         }
       }
 
-      // Process transfers FROM address (mark as burns if sent to zero address)
       for (const transfer of fromTransfers) {
         const tokenId = transfer.tokenId || (transfer.tokenIds && transfer.tokenIds[0]);
         if (tokenId && transfer.to?.toLowerCase() !== address.toLowerCase()) {
@@ -306,14 +306,18 @@ export class AlchemyIndexerService {
           if (transfer.blockNum) {
             blockNum = typeof transfer.blockNum === 'string' 
               ? parseInt(transfer.blockNum, 16) 
-              : transfer.blockNum;
+              : Number(transfer.blockNum);
           }
 
           let timestamp = 0;
           if (transfer.blockTimestamp) {
-            timestamp = typeof transfer.blockTimestamp === 'string'
-              ? new Date(transfer.blockTimestamp).getTime() / 1000
-              : transfer.blockTimestamp;
+            if (typeof transfer.blockTimestamp === 'string') {
+              timestamp = new Date(transfer.blockTimestamp).getTime() / 1000;
+            } else if (transfer.blockTimestamp instanceof Date) {
+              timestamp = transfer.blockTimestamp.getTime() / 1000;
+            } else {
+              timestamp = Number(transfer.blockTimestamp);
+            }
           }
 
           transfers.push({
@@ -329,8 +333,9 @@ export class AlchemyIndexerService {
       }
 
       return transfers.sort((a, b) => a.blockNumber - b.blockNumber);
-    } catch (error: any) {
-      console.error('Error fetching position transfers from Alchemy:', error.message);
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      console.error('Error fetching position transfers from Alchemy:', errorMessage);
       return [];
     }
   }
@@ -357,30 +362,58 @@ export class AlchemyIndexerService {
         excludeZeroValue: false,
       });
 
-      // Convert to TransactionData format
       const transactions: TransactionData[] = [];
       const seenHashes = new Set<string>();
 
       for (const transfer of transfers) {
         if (transfer.hash && !seenHashes.has(transfer.hash)) {
           seenHashes.add(transfer.hash);
+          
+          let blockNumber = 0;
+          if (transfer.blockNum) {
+            blockNumber = typeof transfer.blockNum === 'string' 
+              ? parseInt(transfer.blockNum, 16) 
+              : Number(transfer.blockNum);
+          }
+
+          let timestamp = 0;
+          if (transfer.blockTimestamp) {
+            if (typeof transfer.blockTimestamp === 'string') {
+              timestamp = new Date(transfer.blockTimestamp).getTime() / 1000;
+            } else if (transfer.blockTimestamp instanceof Date) {
+              timestamp = transfer.blockTimestamp.getTime() / 1000;
+            } else {
+              timestamp = Number(transfer.blockTimestamp);
+            }
+          }
+
+          let value = '0';
+          if (transfer.value) {
+            if (typeof transfer.value === 'bigint' || typeof transfer.value === 'string') {
+              value = transfer.value.toString();
+            } else {
+              value = String(transfer.value);
+            }
+          }
+
           transactions.push({
             hash: transfer.hash,
-            blockNumber: transfer.blockNum ? parseInt(transfer.blockNum, 16) : 0,
-            timestamp: new Date(transfer.blockTimestamp || '').getTime() / 1000,
+            blockNumber,
+            timestamp,
             from: transfer.from || '',
             to: transfer.to || '',
-            value: transfer.value?.toString() || '0',
-            gasUsed: '0', // Not available in transfers API
-            gasPrice: '0', // Not available in transfers API
-            logs: [], // Will be fetched separately if needed
+            value,
+            gasUsed: '0',
+            gasPrice: '0',
+            logs: [],
           });
         }
       }
 
       return transactions.sort((a, b) => a.blockNumber - b.blockNumber);
-    } catch (error: any) {
-      console.error('Error fetching transactions from Alchemy:', error.message);
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      console.error('Error fetching transactions from Alchemy:', errorMessage);
       return [];
     }
   }
@@ -460,15 +493,14 @@ export class AlchemyIndexerService {
             }
           }
         }
-      } catch (error: any) {
-        // Silently skip individual transaction errors to prevent one bad tx from breaking everything
-        if (!error.message?.includes('Timeout')) {
-          // Only log non-timeout errors to reduce noise
-          if (transactionsToParse.indexOf(tx) < 10) { // Only log first 10 errors
-            console.warn(`Error processing tx ${tx.hash}:`, error.message);
+      } catch (error: unknown) {
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        if (!errorMessage.includes('Timeout')) {
+          if (transactionsToParse.indexOf(tx) < 10) {
+            console.warn(`Error processing tx ${tx.hash}:`, errorMessage);
           }
         }
-        continue; // Continue processing other transactions
+        continue;
       }
     }
 
@@ -497,22 +529,47 @@ export class AlchemyIndexerService {
     fromBlock?: number;
     toBlock?: number;
     excludeZeroValue?: boolean;
-  }): Promise<any[]> {
-    // Return empty array if no API key (graceful degradation)
+  }): Promise<AlchemyTransfer[]> {
     if (!this.apiKey || this.apiKey === 'placeholder') {
       return [];
     }
 
     try {
-      const payload: any = {
+      interface AlchemyRequestPayload {
+        id: number;
+        jsonrpc: string;
+        method: string;
+        params: Array<{
+          fromBlock?: string;
+          toBlock?: string;
+          fromAddress?: string;
+          toAddress?: string;
+          contractAddresses?: string[];
+          category?: string[];
+          excludeZeroValue?: boolean;
+          maxCount?: number;
+        }>;
+      }
+
+      const payload: AlchemyRequestPayload = {
         id: 1,
         jsonrpc: '2.0',
         method: 'alchemy_getAssetTransfers',
         params: [{}],
       };
 
-      // Build params object, only including defined values
-      const apiParams: any = {};
+      interface AlchemyApiParams {
+        fromBlock?: string;
+        toBlock?: string;
+        fromAddress?: string;
+        toAddress?: string;
+        contractAddresses?: string[];
+        category?: string[];
+        excludeZeroValue?: boolean;
+        maxCount?: number;
+      }
+
+      const apiParams: AlchemyApiParams = {};
       if (params.fromBlock !== undefined) {
         apiParams.fromBlock = `0x${params.fromBlock.toString(16)}`;
       }
@@ -541,15 +598,15 @@ export class AlchemyIndexerService {
       payload.params[0] = apiParams;
 
       const response = await Promise.race([
-        this.axiosInstance.post('', payload),
-        new Promise((_, reject) => 
+        this.axiosInstance.post<AlchemyJsonRpcResponse>('', payload),
+        new Promise<never>((_, reject) => 
           setTimeout(() => reject(new Error('Request timeout')), 30000)
         )
-      ]) as any;
+      ]);
       
-      if (response?.data?.error) {
-        const errorMsg = response.data.error.message || 'Alchemy API error';
-        // Don't throw for rate limits or temporary errors - just log and return empty
+      const responseData = response.data;
+      if (responseData.error) {
+        const errorMsg = responseData.error.message || 'Alchemy API error';
         if (errorMsg.includes('rate limit') || errorMsg.includes('429')) {
           console.warn('Alchemy API rate limit hit, returning empty results');
           return [];
@@ -557,17 +614,21 @@ export class AlchemyIndexerService {
         throw new Error(errorMsg);
       }
 
-      return response?.data?.result?.transfers || [];
-    } catch (error: any) {
-      // Handle specific error types gracefully
-      if (error.code === 'ECONNABORTED' || error.message?.includes('timeout')) {
-        console.warn('Alchemy API request timeout, returning empty results');
-      } else if (error.response?.status === 429) {
-        console.warn('Alchemy API rate limit, returning empty results');
+      return responseData.result?.transfers || [];
+    } catch (error: unknown) {
+      if (error instanceof AxiosError) {
+        if (error.code === 'ECONNABORTED' || error.message?.includes('timeout')) {
+          console.warn('Alchemy API request timeout, returning empty results');
+        } else if (error.response?.status === 429) {
+          console.warn('Alchemy API rate limit, returning empty results');
+        } else {
+          console.error('Alchemy getAssetTransfers error:', error.message || error);
+        }
+      } else if (error instanceof Error) {
+        console.error('Alchemy getAssetTransfers error:', error.message);
       } else {
-        console.error('Alchemy getAssetTransfers error:', error.message || error);
+        console.error('Alchemy getAssetTransfers error: Unknown error');
       }
-      // Return empty array on error instead of throwing (graceful degradation)
       return [];
     }
   }
