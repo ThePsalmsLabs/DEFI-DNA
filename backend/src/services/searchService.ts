@@ -2,6 +2,7 @@ import { ethers } from 'ethers';
 import { Pool } from 'pg';
 import { DNASubscriberABI, DNAReaderABI } from '../types/contracts';
 import { AlchemyIndexerService, IndexedWalletData } from './alchemyIndexerService';
+import * as dbQueries from '../db/queries';
 
 interface PoolInteraction {
   poolId: string;
@@ -136,7 +137,9 @@ export class SearchService {
 
   /**
    * Search for wallet interactions across all pools
-   * Now uses Alchemy indexer for comprehensive historical data (CRITICAL-2 fix)
+   * Now uses database caching and Alchemy indexer for comprehensive historical data
+   * CRITICAL-2 fix: Comprehensive event indexing
+   * CRITICAL-3 fix: Database caching and persistence
    */
   async searchWallet(walletAddress: string): Promise<WalletSearchResult> {
     // Validate address
@@ -146,10 +149,56 @@ export class SearchService {
 
     const normalizedAddress = ethers.getAddress(walletAddress);
 
+    // Step 1: Check database cache first (CRITICAL-3: caching)
+    let cachedUser: dbQueries.UserRow | null = null;
+    if (this.db) {
+      try {
+        cachedUser = await dbQueries.getUser(this.db, normalizedAddress);
+        
+        // If cached data exists and is fresh (< 5 minutes old), return it
+        if (cachedUser) {
+          const cacheAge = Date.now() - new Date(cachedUser.updated_at).getTime();
+          const cacheMaxAge = 5 * 60 * 1000; // 5 minutes
+          
+          if (cacheAge < cacheMaxAge) {
+            console.log(`✅ Returning cached data for ${normalizedAddress} (age: ${Math.round(cacheAge / 1000)}s)`);
+            
+            // Fetch pool interactions and recent activity from DB
+            const poolInteractions = await this.getPoolInteractionsFromDB(normalizedAddress);
+            const recentActivity = await this.getRecentActivityFromDB(normalizedAddress);
+            
+            return {
+              address: normalizedAddress,
+              summary: {
+                totalSwaps: cachedUser.total_swaps || 0,
+                totalVolumeUsd: Number(cachedUser.total_volume_usd) || 0,
+                totalFeesEarned: Number(cachedUser.total_fees_earned) || 0,
+                totalPositions: cachedUser.total_positions || 0,
+                activePositions: cachedUser.active_positions || 0,
+                uniquePools: cachedUser.unique_pools || 0,
+                dnaScore: cachedUser.dna_score || 0,
+                tier: cachedUser.tier || 'Novice',
+                firstActionTimestamp: cachedUser.first_action_timestamp ? Number(cachedUser.first_action_timestamp) : 0,
+                lastActionTimestamp: cachedUser.last_action_timestamp ? Number(cachedUser.last_action_timestamp) : 0,
+              },
+              poolInteractions,
+              recentActivity,
+            };
+          } else {
+            console.log(`⚠️ Cached data for ${normalizedAddress} is stale (age: ${Math.round(cacheAge / 1000)}s), refreshing...`);
+          }
+        }
+      } catch (error: any) {
+        console.error('Error fetching cached user data:', error.message);
+        // Continue to fetch fresh data
+      }
+    }
+
+    // Step 2: Fetch fresh data from blockchain and indexer
     // Fetch on-chain data from DNASubscriber (may be empty if not subscribed)
     const onChainData = await this.fetchOnChainData(normalizedAddress);
 
-    // Fetch database data if available
+    // Fetch database data if available (for pool stats)
     const dbData = this.db ? await this.fetchDatabaseData(normalizedAddress) : null;
 
     // Fetch indexed data from Alchemy (comprehensive historical data)
@@ -233,7 +282,7 @@ export class SearchService {
       ? this.buildRecentActivityFromIndexedData(indexedData)
       : (dbData?.recentActivity || undefined);
 
-    return {
+    const result: WalletSearchResult = {
       address: normalizedAddress,
       summary: {
         totalSwaps,
@@ -250,6 +299,138 @@ export class SearchService {
       poolInteractions,
       recentActivity,
     };
+
+    // Step 3: Save to database for caching (CRITICAL-3: persistence)
+    if (this.db) {
+      try {
+        await this.saveToDatabase(normalizedAddress, result, positions);
+        console.log(`✅ Saved data to database for ${normalizedAddress}`);
+      } catch (error: any) {
+        console.error('Error saving to database:', error.message);
+        // Don't fail the request if database save fails
+      }
+    }
+
+    return result;
+  }
+
+  /**
+   * Save wallet data to database for caching
+   */
+  private async saveToDatabase(
+    address: string,
+    result: WalletSearchResult,
+    positions: any[]
+  ): Promise<void> {
+    if (!this.db) return;
+
+    try {
+      // Save user summary
+      await dbQueries.upsertUser(this.db, address, {
+        dnaScore: result.summary.dnaScore,
+        tier: result.summary.tier,
+        totalSwaps: result.summary.totalSwaps,
+        totalVolumeUsd: result.summary.totalVolumeUsd,
+        totalFeesEarned: result.summary.totalFeesEarned,
+        totalPositions: result.summary.totalPositions,
+        activePositions: result.summary.activePositions,
+        uniquePools: result.summary.uniquePools,
+        firstActionTimestamp: result.summary.firstActionTimestamp || undefined,
+        lastActionTimestamp: result.summary.lastActionTimestamp || undefined,
+      });
+
+      // Save positions
+      for (const position of positions) {
+        await dbQueries.upsertPosition(this.db, {
+          tokenId: position.tokenId,
+          ownerAddress: address,
+          poolId: position.poolId,
+          liquidity: position.liquidity,
+          tickLower: position.tickLower,
+          tickUpper: position.tickUpper,
+          isActive: position.isActive,
+          isSubscribed: position.isSubscribed || false,
+        });
+      }
+
+      // Save pool interactions
+      for (const interaction of result.poolInteractions) {
+        await dbQueries.upsertPoolInteraction(this.db, {
+          userAddress: address,
+          poolId: interaction.poolId,
+          totalSwaps: interaction.totalSwaps,
+          totalVolumeUsd: interaction.totalVolumeUsd,
+          totalFeesEarned: interaction.totalFeesEarned,
+          firstInteraction: interaction.firstInteraction || undefined,
+          lastInteraction: interaction.lastInteraction || undefined,
+        });
+      }
+
+      // Save recent activity
+      if (result.recentActivity) {
+        for (const activity of result.recentActivity.slice(0, 50)) {
+          await dbQueries.insertUserAction(this.db, {
+            address,
+            actionType: activity.type,
+            poolId: activity.poolId,
+            txHash: activity.txHash,
+            timestamp: activity.timestamp,
+          });
+        }
+      }
+    } catch (error: any) {
+      console.error('Error in saveToDatabase:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get pool interactions from database
+   */
+  private async getPoolInteractionsFromDB(address: string): Promise<PoolInteraction[]> {
+    if (!this.db) return [];
+
+    try {
+      const dbInteractions = await dbQueries.getUserPoolInteractions(this.db, address);
+      
+      return dbInteractions.map(interaction => ({
+        poolId: interaction.pool_id,
+        totalSwaps: interaction.total_swaps,
+        totalVolumeUsd: Number(interaction.total_volume_usd) || 0,
+        totalFeesEarned: Number(interaction.total_fees_earned) || 0,
+        firstInteraction: interaction.first_interaction ? Number(interaction.first_interaction) : 0,
+        lastInteraction: interaction.last_interaction ? Number(interaction.last_interaction) : 0,
+      }));
+    } catch (error: any) {
+      console.error('Error fetching pool interactions from DB:', error.message);
+      return [];
+    }
+  }
+
+  /**
+   * Get recent activity from database
+   */
+  private async getRecentActivityFromDB(address: string): Promise<Array<{
+    type: 'swap' | 'mint' | 'burn' | 'collect';
+    poolId: string;
+    timestamp: number;
+    txHash?: string;
+  }>> {
+    if (!this.db) return [];
+
+    try {
+      const actions = await dbQueries.getRecentUserActions(this.db, address, 50);
+      
+      return actions.map(action => ({
+        type: action.action_type as 'swap' | 'mint' | 'burn' | 'collect',
+        poolId: action.pool_id || '',
+        timestamp: Number(action.timestamp),
+        txHash: action.tx_hash || undefined,
+      }));
+    } catch (error: any) {
+      console.error('Error fetching recent activity from DB:', error.message);
+      return [];
+    }
   }
 
   /**
