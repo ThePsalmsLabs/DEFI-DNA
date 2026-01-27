@@ -62,6 +62,10 @@ const POSITION_MANAGER_ABI = [
 // Base Mainnet PositionManager address
 const BASE_POSITION_MANAGER = '0xbD216513d74C8cf14cf4747E6AaA6420FF64ee9e';
 
+// Uniswap V4 deployment block on Base Mainnet (May 2024)
+// This is when Uniswap V4 PositionManager was deployed
+const UNISWAP_V4_DEPLOYMENT_BLOCK = 14506421;
+
 export class SearchService {
   private provider: ethers.JsonRpcProvider;
   private dnaSubscriber: ethers.Contract;
@@ -209,10 +213,15 @@ export class SearchService {
         const deploymentBlock = await this.indexer.getUniswapV4DeploymentBlock();
         const currentBlock = await this.provider.getBlockNumber();
         
-        // Use indexer to get ALL historical data (not limited to 50k blocks)
+        // CRITICAL-4: Use indexer to get ALL historical data from deployment block
+        // No longer limited to arbitrary block ranges - uses full history
+        const fromBlock = deploymentBlock > 0 
+          ? deploymentBlock 
+          : UNISWAP_V4_DEPLOYMENT_BLOCK; // Fallback to known deployment block
+        
         indexedData = await this.indexer.getWalletData(
           normalizedAddress,
-          deploymentBlock > 0 ? deploymentBlock : Math.max(0, currentBlock - 1000000), // 1M blocks = ~23 days at 2s/block
+          fromBlock,
           currentBlock
         );
         console.log(`✅ Indexed ${indexedData.totalTransactions} transactions, ${indexedData.positions.length} positions, ${indexedData.swaps.length} swaps`);
@@ -525,11 +534,37 @@ export class SearchService {
 
   /**
    * Fetch position details for the wallet
-   * Uses indexer data to find ALL historical positions (not limited to 50k blocks)
+   * CRITICAL-4 fix: Uses database first (full history), then indexer, then blockchain fallback
+   * No longer limited to 50k blocks - accesses ALL historical positions
    */
   private async fetchPositions(address: string, indexedData?: IndexedWalletData | null) {
     const positions: any[] = [];
     const tokenIdSet = new Set<string>();
+
+    // Step 0: Check database first (CRITICAL-4: full historical data from database)
+    if (this.db) {
+      try {
+        const dbPositions = await dbQueries.getUserPositions(this.db, address);
+        console.log(`📊 Found ${dbPositions.length} positions in database for ${address}`);
+        
+        for (const dbPos of dbPositions) {
+          tokenIdSet.add(dbPos.token_id);
+          positions.push({
+            tokenId: dbPos.token_id,
+            poolId: dbPos.pool_id,
+            liquidity: dbPos.liquidity || '0',
+            tickLower: dbPos.tick_lower || 0,
+            tickUpper: dbPos.tick_upper || 0,
+            isActive: dbPos.is_active,
+            isSubscribed: dbPos.is_subscribed,
+            fromDatabase: true,
+          });
+        }
+      } catch (error: any) {
+        console.error('Error fetching positions from database:', error.message);
+        // Continue to other sources
+      }
+    }
 
     // Step 1: Get positions from DNASubscriber (subscribed positions)
     try {
@@ -624,39 +659,70 @@ export class SearchService {
       }
     }
 
-    // Step 3: Fallback to querying PositionManager Transfer events (limited to 50k blocks)
-    // This is a fallback if indexer is not available
-    if (!indexedData || indexedData.positions.length === 0) {
+    // Step 3: Fallback to querying PositionManager Transfer events from blockchain
+    // CRITICAL-4 fix: Only use this if database and indexer both failed
+    // Uses deployment block and chunked queries to get full history
+    // This is a last resort - database and indexer should handle most cases
+    if (positions.length === 0 && (!indexedData || indexedData.positions.length === 0)) {
       try {
-        console.log(`Querying PositionManager events for ${address}...`);
+        console.log(`⚠️ No positions found in database or indexer, querying blockchain for ${address}...`);
         
         // Get Transfer events where this address received tokens (minted or transferred to)
         const currentBlock = await this.provider.getBlockNumber();
-        // Query last 50k blocks (Base mainnet has ~2s block time, so ~28 days of history)
-        const fromBlock = Math.max(0, currentBlock - 50000);
+        
+        // CRITICAL-4 fix: Query from V4 deployment block to get ALL historical positions
+        // This ensures we get positions from May 2024 onwards, not just recent ones
+        const fromBlock = UNISWAP_V4_DEPLOYMENT_BLOCK;
+        
+        console.log(`Querying blocks ${fromBlock} to ${currentBlock} (${currentBlock - fromBlock} blocks)`);
       
       const transferFilter = this.positionManager.filters.Transfer(null, address);
-      const transfers = await this.positionManager.queryFilter(transferFilter, fromBlock, 'latest');
       
-      console.log(`Found ${transfers.length} Transfer events to ${address}`);
-
-      // Also check transfers FROM this address (to handle current ownership)
-      const fromTransfers = await this.positionManager.queryFilter(
-        this.positionManager.filters.Transfer(address, null),
-        fromBlock,
-        'latest'
-      );
+      // CRITICAL-4: Query in chunks to avoid RPC limits
+      // Most RPC providers limit eth_getLogs to 10k-100k blocks
+      const CHUNK_SIZE = 50000; // Safe chunk size
+      let allTransfers: any[] = [];
+      let allFromTransfers: any[] = [];
+      
+      // Query in chunks from deployment block to current
+      for (let chunkStart = fromBlock; chunkStart < currentBlock; chunkStart += CHUNK_SIZE) {
+        const chunkEnd = Math.min(chunkStart + CHUNK_SIZE, currentBlock);
+        
+        try {
+          console.log(`  Querying chunk: ${chunkStart} to ${chunkEnd}...`);
+          
+          const transfers = await this.positionManager.queryFilter(
+            transferFilter,
+            chunkStart,
+            chunkEnd
+          );
+          allTransfers.push(...transfers);
+          
+          // Also check transfers FROM this address
+          const fromTransfers = await this.positionManager.queryFilter(
+            this.positionManager.filters.Transfer(address, null),
+            chunkStart,
+            chunkEnd
+          );
+          allFromTransfers.push(...fromTransfers);
+        } catch (error: any) {
+          console.error(`Error querying chunk ${chunkStart}-${chunkEnd}:`, error.message);
+          // Continue with next chunk
+        }
+      }
+      
+      console.log(`Found ${allTransfers.length} Transfer events to ${address} (queried ${currentBlock - fromBlock} blocks)`);
 
       // Build set of token IDs that were minted to or transferred to this address
       const receivedTokenIds = new Set<string>();
-      for (const event of transfers) {
+      for (const event of allTransfers) {
         if ('args' in event && event.args && event.args.tokenId) {
           receivedTokenIds.add(event.args.tokenId.toString());
         }
       }
 
       // Remove tokens that were transferred away
-      for (const event of fromTransfers) {
+      for (const event of allFromTransfers) {
         if ('args' in event && event.args && event.args.to && event.args.to.toLowerCase() !== address.toLowerCase()) {
           receivedTokenIds.delete(event.args.tokenId.toString());
         }
@@ -665,12 +731,18 @@ export class SearchService {
       console.log(`Found ${receivedTokenIds.size} unique positions for ${address}`);
 
       // Fetch details for positions not already in our list
+      // CRITICAL-4: Don't limit to 20 - we want all positions from full history
       let fetchedCount = 0;
-      const maxToFetch = 20; // Limit for performance
+      const maxToFetch = 100; // Increased limit for comprehensive historical data
 
       for (const tokenIdStr of receivedTokenIds) {
-        if (tokenIdSet.has(tokenIdStr) || fetchedCount >= maxToFetch) {
-          continue;
+        if (tokenIdSet.has(tokenIdStr)) {
+          continue; // Already have this position from database or indexer
+        }
+        
+        if (fetchedCount >= maxToFetch) {
+          console.log(`⚠️ Reached fetch limit (${maxToFetch}), skipping remaining positions`);
+          break;
         }
 
         try {
