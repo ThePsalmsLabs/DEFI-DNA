@@ -6,28 +6,16 @@ import { useQuery } from '@tanstack/react-query';
 import { Search, Loader2, AlertCircle, ExternalLink, TrendingUp, DollarSign, Activity, Layers, Waves, Star, TreePine, Sprout, Leaf } from 'lucide-react';
 import Link from 'next/link';
 import { WalletSearchResult } from '@/types/search';
+import { searchWallet } from '@/lib/api';
 import { clsx } from 'clsx';
 
 export default function SearchPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [walletAddress, setWalletAddress] = useState<string | null>(null);
 
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
-
   const { data: searchResult, isLoading, error, refetch } = useQuery<WalletSearchResult>({
     queryKey: ['search', walletAddress],
-    queryFn: async () => {
-      if (!walletAddress) throw new Error('No wallet address provided');
-
-      const response = await fetch(`${apiUrl}/api/v1/search?wallet=${encodeURIComponent(walletAddress)}`);
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.message || `Failed to search: ${response.statusText}`);
-      }
-
-      return response.json();
-    },
+    queryFn: () => searchWallet(walletAddress!),
     enabled: !!walletAddress && /^0x[a-fA-F0-9]{40}$/.test(walletAddress),
     retry: 1,
   });
