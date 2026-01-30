@@ -1,12 +1,13 @@
 'use client';
 
 import { useAccount, useConnect, useDisconnect, useEnsName } from 'wagmi';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Wallet, ChevronDown, LogOut, Copy, ExternalLink, Check } from 'lucide-react';
 import { clsx } from 'clsx';
 
 export function ConnectButton() {
+  const [mounted, setMounted] = useState(false);
   const { address, isConnected } = useAccount();
   const { connect, connectors, isPending } = useConnect();
   const { disconnect } = useDisconnect();
@@ -15,6 +16,9 @@ export function ConnectButton() {
   const [showDropdown, setShowDropdown] = useState(false);
   const [showConnectors, setShowConnectors] = useState(false);
   const [copied, setCopied] = useState(false);
+
+  // Avoid hydration mismatch: Wagmi state can differ on server vs client (e.g. rehydrated connection).
+  useEffect(() => setMounted(true), []);
 
   const truncateAddress = (addr: string) => {
     return `${addr.slice(0, 6)}...${addr.slice(-4)}`;
@@ -27,6 +31,18 @@ export function ConnectButton() {
       setTimeout(() => setCopied(false), 2000);
     }
   };
+
+  // Render a stable placeholder until after mount so server and client HTML match.
+  if (!mounted) {
+    return (
+      <div className="relative w-full">
+        <div className="w-full flex items-center justify-center gap-2 px-8 py-4 bg-gradient-to-r from-primary-500 to-purple-500 text-white font-semibold rounded-xl opacity-90 shadow-glow animate-pulse">
+          <Wallet className="w-5 h-5" />
+          <span>Connect Wallet</span>
+        </div>
+      </div>
+    );
+  }
 
   if (!isConnected) {
     return (

@@ -365,6 +365,152 @@ app.get('/api/v1/profile/:address', async (req, res) => {
   }
 });
 
+// --- Analytics endpoints ---
+
+app.get('/api/v1/analytics/overview', async (req, res) => {
+  try {
+    if (!dbPool) {
+      return res.status(503).json({
+        error: 'Database unavailable',
+        message: 'Analytics requires database connection.',
+      });
+    }
+    const dbQueries = await import('./db/queries');
+    const row = await dbQueries.getPlatformOverview(dbPool);
+    if (!row) {
+      return res.json({
+        totalUsers: 0,
+        totalVolumeUsd: 0,
+        totalFeesEarned: 0,
+        totalPositions: 0,
+        activePositions: 0,
+        avgDnaScore: 0,
+      });
+    }
+    res.json({
+      totalUsers: parseInt(row.total_users, 10) || 0,
+      totalVolumeUsd: parseFloat(row.total_volume_usd) || 0,
+      totalFeesEarned: parseFloat(row.total_fees_earned) || 0,
+      totalPositions: parseInt(row.total_positions, 10) || 0,
+      activePositions: parseInt(row.active_positions, 10) || 0,
+      avgDnaScore: parseFloat(row.avg_dna_score) || 0,
+    });
+  } catch (error: any) {
+    logger.error('Analytics overview error', { error: error?.message });
+    res.status(500).json({
+      error: 'Failed to fetch analytics overview',
+      message: error.message || 'An error occurred',
+    });
+  }
+});
+
+app.get('/api/v1/analytics/tiers', async (req, res) => {
+  try {
+    if (!dbPool) {
+      return res.status(503).json({
+        error: 'Database unavailable',
+        message: 'Analytics requires database connection.',
+      });
+    }
+    const dbQueries = await import('./db/queries');
+    const rows = await dbQueries.getTierDistribution(dbPool);
+    res.json({
+      tiers: rows.map((r) => ({ tier: r.tier, count: parseInt(r.count, 10) || 0 })),
+    });
+  } catch (error: any) {
+    logger.error('Analytics tiers error', { error: error?.message });
+    res.status(500).json({
+      error: 'Failed to fetch tier distribution',
+      message: error.message || 'An error occurred',
+    });
+  }
+});
+
+app.get('/api/v1/analytics/pools', async (req, res) => {
+  try {
+    if (!dbPool) {
+      return res.status(503).json({
+        error: 'Database unavailable',
+        message: 'Analytics requires database connection.',
+      });
+    }
+    const limit = Math.min(parseInt(req.query.limit as string) || 10, 100);
+    const dbQueries = await import('./db/queries');
+    const rows = await dbQueries.getTopPools(dbPool, limit);
+    res.json({
+      pools: rows.map((r) => ({
+        poolId: r.pool_id,
+        totalVolume: parseFloat(r.total_volume) || 0,
+        totalSwaps: parseInt(r.total_swaps, 10) || 0,
+        uniqueUsers: parseInt(r.unique_users, 10) || 0,
+        feesEarned: parseFloat(r.fees_earned) || 0,
+      })),
+    });
+  } catch (error: any) {
+    logger.error('Analytics pools error', { error: error?.message });
+    res.status(500).json({
+      error: 'Failed to fetch top pools',
+      message: error.message || 'An error occurred',
+    });
+  }
+});
+
+app.get('/api/v1/analytics/activity', async (req, res) => {
+  try {
+    if (!dbPool) {
+      return res.status(503).json({
+        error: 'Database unavailable',
+        message: 'Analytics requires database connection.',
+      });
+    }
+    const period = (req.query.period as string) || '30d';
+    const daysMatch = period.match(/^(\d+)d$/);
+    const days = daysMatch ? Math.min(parseInt(daysMatch[1], 10), 90) : 30;
+    const dbQueries = await import('./db/queries');
+    const rows = await dbQueries.getActivityTimeSeries(dbPool, days);
+    res.json({
+      data: rows.map((r) => ({
+        date: r.date,
+        swaps: parseInt(r.swaps, 10) || 0,
+        mints: parseInt(r.mints, 10) || 0,
+        burns: parseInt(r.burns, 10) || 0,
+        collects: parseInt(r.collects, 10) || 0,
+      })),
+    });
+  } catch (error: any) {
+    logger.error('Analytics activity error', { error: error?.message });
+    res.status(500).json({
+      error: 'Failed to fetch activity time series',
+      message: error.message || 'An error occurred',
+    });
+  }
+});
+
+app.get('/api/v1/analytics/scores', async (req, res) => {
+  try {
+    if (!dbPool) {
+      return res.status(503).json({
+        error: 'Database unavailable',
+        message: 'Analytics requires database connection.',
+      });
+    }
+    const dbQueries = await import('./db/queries');
+    const rows = await dbQueries.getScoreDistribution(dbPool);
+    res.json({
+      distribution: rows.map((r) => ({
+        range: r.range,
+        count: parseInt(r.count, 10) || 0,
+      })),
+    });
+  } catch (error: any) {
+    logger.error('Analytics scores error', { error: error?.message });
+    res.status(500).json({
+      error: 'Failed to fetch score distribution',
+      message: error.message || 'An error occurred',
+    });
+  }
+});
+
 // WebSocket server
 const server = createServer(app);
 const wss = new WebSocketServer({ server });

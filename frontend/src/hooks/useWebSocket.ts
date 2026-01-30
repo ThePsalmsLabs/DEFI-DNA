@@ -113,23 +113,33 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
       };
 
       ws.onclose = () => {
-        console.log('WebSocket disconnected');
         setIsConnected(false);
         optionsRef.current.onDisconnect?.();
         wsRef.current = null;
 
-        // Attempt to reconnect after 5 seconds
+        // Attempt to reconnect after 5 seconds (only in dev to avoid noisy logs)
         reconnectTimeoutRef.current = setTimeout(() => {
-          console.log('Attempting to reconnect...');
+          if (process.env.NODE_ENV === 'development') {
+            console.log('[WebSocket] Reconnecting...');
+          }
           connect();
         }, 5000);
       };
 
-      ws.onerror = (error) => {
-        console.error('WebSocket error:', error);
+      ws.onerror = () => {
+        // Browser often gives an empty event; connection likely failed (e.g. backend not running).
+        if (process.env.NODE_ENV === 'development') {
+          console.warn(
+            '[WebSocket] Connection failed. Backend may be unavailable at',
+            wsUrl,
+            '- real-time updates disabled.'
+          );
+        }
       };
     } catch (error) {
-      console.error('Failed to create WebSocket:', error);
+      if (process.env.NODE_ENV === 'development') {
+        console.warn('[WebSocket] Failed to create connection:', error);
+      }
     }
   }, [wsUrl, address, onAction, onAchievement, onUpdate, queryClient]);
 

@@ -5,6 +5,14 @@
  * - Optional retries with exponential backoff
  */
 
+import type {
+  PlatformOverview,
+  TierDistribution,
+  TopPoolsResponse,
+  ActivityData,
+  ScoreDistribution,
+} from '@/types/analytics';
+
 const DEFAULT_TIMEOUT_MS = 10000;
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
 
@@ -127,4 +135,43 @@ export async function getLeaderboard(params?: { limit?: number; offset?: number 
   return apiGet<{ users: unknown[]; pagination: unknown }>(
     `/api/v1/leaderboard${query ? `?${query}` : ''}`
   );
+}
+
+// --- Analytics ---
+
+/**
+ * Get platform overview - GET /api/v1/analytics/overview
+ */
+export async function getAnalyticsOverview(): Promise<PlatformOverview> {
+  return apiGet<PlatformOverview>('/api/v1/analytics/overview');
+}
+
+/**
+ * Get tier distribution - GET /api/v1/analytics/tiers
+ */
+export async function getTierDistribution(): Promise<TierDistribution> {
+  return apiGet<TierDistribution>('/api/v1/analytics/tiers');
+}
+
+/**
+ * Get top pools - GET /api/v1/analytics/pools?limit=10
+ */
+export async function getTopPools(limit?: number): Promise<TopPoolsResponse> {
+  const q = limit != null ? `?limit=${limit}` : '';
+  return apiGet<TopPoolsResponse>(`/api/v1/analytics/pools${q}`);
+}
+
+/**
+ * Get activity time series - GET /api/v1/analytics/activity?period=30d
+ */
+export async function getActivityTimeSeries(period?: string): Promise<ActivityData> {
+  const q = period ? `?period=${encodeURIComponent(period)}` : '';
+  return apiGet<ActivityData>(`/api/v1/analytics/activity${q}`);
+}
+
+/**
+ * Get score distribution - GET /api/v1/analytics/scores
+ */
+export async function getScoreDistribution(): Promise<ScoreDistribution> {
+  return apiGet<ScoreDistribution>('/api/v1/analytics/scores');
 }

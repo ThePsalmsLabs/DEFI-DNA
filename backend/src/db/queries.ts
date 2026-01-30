@@ -390,3 +390,142 @@ export async function getLeaderboardCount(pool: Pool): Promise<number> {
 
   return parseInt(result.rows[0].count, 10);
 }
+
+// --- Analytics queries ---
+
+export interface PlatformOverviewRow {
+  total_users: string;
+  total_volume_usd: string;
+  total_fees_earned: string;
+  total_positions: string;
+  active_positions: string;
+  avg_dna_score: string;
+}
+
+/**
+ * Get platform-wide aggregated statistics for analytics overview
+ */
+export async function getPlatformOverview(pool: Pool): Promise<PlatformOverviewRow | null> {
+  const result = await pool.query<PlatformOverviewRow>(
+    `SELECT
+      COUNT(*)::text AS total_users,
+      COALESCE(SUM(total_volume_usd), 0)::text AS total_volume_usd,
+      COALESCE(SUM(total_fees_earned), 0)::text AS total_fees_earned,
+      COALESCE(SUM(total_positions), 0)::text AS total_positions,
+      COALESCE(SUM(active_positions), 0)::text AS active_positions,
+      COALESCE(ROUND(AVG(dna_score)::numeric, 2), 0)::text AS avg_dna_score
+     FROM users
+     WHERE dna_score > 0`
+  );
+  return result.rows[0] || null;
+}
+
+export interface TierDistributionRow {
+  tier: string;
+  count: string;
+}
+
+/**
+ * Get user count per tier for analytics
+ */
+export async function getTierDistribution(pool: Pool): Promise<TierDistributionRow[]> {
+  const result = await pool.query<TierDistributionRow>(
+    `SELECT tier, COUNT(*)::text AS count
+     FROM users
+     WHERE dna_score > 0 AND tier IS NOT NULL AND tier != ''
+     GROUP BY tier
+     ORDER BY count DESC`
+  );
+  return result.rows;
+}
+
+export interface TopPoolRow {
+  pool_id: string;
+  total_volume: string;
+  total_swaps: string;
+  unique_users: string;
+  fees_earned: string;
+}
+
+/**
+ * Get top pools by volume for analytics
+ */
+export async function getTopPools(pool: Pool, limit: number = 10): Promise<TopPoolRow[]> {
+  const result = await pool.query<TopPoolRow>(
+    `SELECT
+      pool_id,
+      COALESCE(SUM(total_volume_usd), 0)::text AS total_volume,
+      COALESCE(SUM(total_swaps), 0)::text AS total_swaps,
+      COUNT(DISTINCT user_address)::text AS unique_users,
+      COALESCE(SUM(total_fees_earned), 0)::text AS fees_earned
+     FROM pool_interactions
+     GROUP BY pool_id
+     ORDER BY SUM(total_volume_usd) DESC NULLS LAST
+     LIMIT $1`,
+    [limit]
+  );
+  return result.rows;
+}
+
+export interface ActivityTimeSeriesRow {
+  date: string;
+  swaps: string;
+  mints: string;
+  burns: string;
+  collects: string;
+}
+
+/**
+ * Get daily activity counts for time-series chart (from user_actions)
+ */
+export async function getActivityTimeSeries(
+  pool: Pool,
+  days: number = 30
+): Promise<ActivityTimeSeriesRow[]> {
+  const result = await pool.query<ActivityTimeSeriesRow>(
+    `SELECT
+      to_char(to_timestamp(timestamp)::date, 'YYYY-MM-DD') AS date,
+      COUNT(*) FILTER (WHERE action_type = 'swap')::text AS swaps,
+      COUNT(*) FILTER (WHERE action_type = 'mint')::text AS mints,
+      COUNT(*) FILTER (WHERE action_type = 'burn')::text AS burns,
+      COUNT(*) FILTER (WHERE action_type = 'collect')::text AS collects
+     FROM user_actions
+     WHERE timestamp >= EXTRACT(EPOCH FROM (NOW() - ($1 || ' days')::interval))::bigint
+     GROUP BY to_timestamp(timestamp)::date
+     ORDER BY date ASC`,
+    [days]
+  );
+  return result.rows;
+}
+
+export interface ScoreDistributionRow {
+  range: string;
+  count: string;
+}
+
+/**
+ * Get DNA score distribution in buckets (0-10, 11-20, ... 91-100)
+ */
+export async function getScoreDistribution(pool: Pool): Promise<ScoreDistributionRow[]> {
+  const result = await pool.query<ScoreDistributionRow>(
+    `SELECT
+      CASE
+        WHEN dna_score <= 10 THEN '0-10'
+        WHEN dna_score <= 20 THEN '11-20'
+        WHEN dna_score <= 30 THEN '21-30'
+        WHEN dna_score <= 40 THEN '31-40'
+        WHEN dna_score <= 50 THEN '41-50'
+        WHEN dna_score <= 60 THEN '51-60'
+        WHEN dna_score <= 70 THEN '61-70'
+        WHEN dna_score <= 80 THEN '71-80'
+        WHEN dna_score <= 90 THEN '81-90'
+        ELSE '91-100'
+      END AS range,
+      COUNT(*)::text AS count
+     FROM users
+     WHERE dna_score >= 0 AND dna_score <= 100
+     GROUP BY 1
+     ORDER BY MIN(dna_score) ASC`
+  );
+  return result.rows;
+}
