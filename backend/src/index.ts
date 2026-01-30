@@ -1,55 +1,96 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import helmet from 'helmet';
+import compression from 'compression';
+import rateLimit from 'express-rate-limit';
 import { createServer } from 'http';
 import { WebSocketServer } from 'ws';
 import { Pool } from 'pg';
 import { ethers } from 'ethers';
 import { SearchService } from './services/searchService';
+import { setWebSocketServer } from './websocket';
+import { startBackgroundIndexerIfConfigured } from './indexer/backgroundIndexer';
+import { logger, captureException } from './utils/logger';
 
 // Load environment variables
 dotenv.config();
 
+// Optional Sentry error tracking (captureException uses this when set)
+if (process.env.SENTRY_DSN) {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const Sentry = require('@sentry/node');
+    Sentry.init({
+      dsn: process.env.SENTRY_DSN,
+      environment: process.env.NODE_ENV || 'development',
+      tracesSampleRate: 0.1,
+    });
+    (global as any).__sentry = Sentry;
+    logger.info('Sentry error tracking enabled');
+  } catch (e) {
+    logger.warn('Sentry init skipped', { error: (e as Error).message });
+  }
+}
+
 const app = express();
 const PORT = process.env.PORT || 4000;
 
-// Initialize database connection if available
+// Initialize database connection if available (DATABASE_URL or DB_* vars)
 let dbPool: Pool | undefined;
-if (process.env.DB_HOST && process.env.DB_NAME) {
+const hasDbUrl = !!process.env.DATABASE_URL;
+const hasDbVars = process.env.DB_HOST && process.env.DB_NAME && process.env.DB_USER;
+if (hasDbUrl || hasDbVars) {
   try {
-    dbPool = new Pool({
-      host: process.env.DB_HOST,
-      port: parseInt(process.env.DB_PORT || '5432'),
-      database: process.env.DB_NAME,
-      user: process.env.DB_USER,
-      password: process.env.DB_PASSWORD,
-      // Add connection timeout and retry settings
-      connectionTimeoutMillis: 5000,
-      idleTimeoutMillis: 30000,
-      max: 10, // Maximum number of clients in the pool
-    });
+    dbPool = hasDbUrl
+      ? new Pool({
+          connectionString: process.env.DATABASE_URL,
+          connectionTimeoutMillis: 5000,
+          idleTimeoutMillis: 30000,
+          max: 10,
+        })
+      : new Pool({
+          host: process.env.DB_HOST,
+          port: parseInt(process.env.DB_PORT || '5432'),
+          database: process.env.DB_NAME,
+          user: process.env.DB_USER,
+          password: process.env.DB_PASSWORD,
+          connectionTimeoutMillis: 5000,
+          idleTimeoutMillis: 30000,
+          max: 10,
+        });
 
-    // Test connection
     dbPool.query('SELECT NOW()', (err) => {
       if (err) {
         console.warn('⚠️ Database connection test failed:', err.message);
-        dbPool = undefined; // Don't use broken connection
+        dbPool = undefined;
       } else {
         console.log('✅ Database connection initialized and tested');
       }
     });
 
-    // Handle pool errors gracefully
     dbPool.on('error', (err) => {
       console.error('⚠️ Database pool error:', err.message);
-      // Don't crash - just log the error
     });
   } catch (error: any) {
     console.warn('⚠️ Database connection failed, continuing without DB:', error.message);
     dbPool = undefined;
   }
 } else {
-  console.log('ℹ️ Database not configured (DB_HOST or DB_NAME missing) - continuing without DB');
+  console.log('ℹ️ Database not configured - set DATABASE_URL or DB_HOST/DB_NAME/DB_USER');
+}
+
+// Start background indexer when DB and RPC are configured
+const positionManagerAddress = process.env.POSITION_MANAGER_ADDRESS || '0xbD216513d74C8cf14cf4747E6AaA6420FF64ee9e';
+const rpcUrlForIndexer = process.env.RPC_URL_BASE || process.env.RPC_URL || '';
+if (dbPool && rpcUrlForIndexer && positionManagerAddress) {
+  const indexer = startBackgroundIndexerIfConfigured(
+    rpcUrlForIndexer,
+    positionManagerAddress,
+    dbPool,
+    { enableRealtime: process.env.INDEXER_REALTIME !== 'false', enableHistoricalSync: process.env.INDEXER_HISTORICAL_SYNC === 'true' }
+  );
+  if (indexer) console.log('✅ Background indexer started');
 }
 
 // Initialize search service
@@ -76,9 +117,22 @@ try {
   console.error('❌ Failed to initialize search service:', error);
 }
 
-// Middleware
+// Production middleware
+app.use(helmet({ contentSecurityPolicy: false }));
+app.use(compression());
+app.use(
+  rateLimit({
+    windowMs: 60 * 1000,
+    max: process.env.RATE_LIMIT_MAX ? parseInt(process.env.RATE_LIMIT_MAX, 10) : 60,
+    message: { error: 'Too many requests', message: 'Please try again later.' },
+    standardHeaders: true,
+    legacyHeaders: false,
+  })
+);
 app.use(cors({
-  origin: process.env.FRONTEND_URL || '*',
+  origin: process.env.NODE_ENV === 'production' && process.env.FRONTEND_URL
+    ? process.env.FRONTEND_URL.split(',').map((o) => o.trim())
+    : process.env.FRONTEND_URL || '*',
   credentials: true,
 }));
 app.use(express.json());
@@ -103,6 +157,12 @@ app.get('/api/v1/search', async (req, res) => {
       return res.status(400).json({ 
         error: 'Wallet address is required',
         message: 'Please provide a wallet address in the query parameter: ?wallet=0x...'
+      });
+    }
+    if (!ethers.isAddress(wallet)) {
+      return res.status(400).json({ 
+        error: 'Invalid address',
+        message: 'Please provide a valid Ethereum address (0x followed by 40 hex characters).'
       });
     }
 
@@ -134,7 +194,7 @@ app.get('/api/v1/search', async (req, res) => {
 
     res.json(result);
   } catch (error: any) {
-    console.error('Search error:', error);
+    logger.error('Search error', { error: error?.message, wallet: req.query.wallet });
     res.status(500).json({ 
       error: 'Search failed',
       message: error.message || 'An error occurred while searching for wallet data'
@@ -289,8 +349,7 @@ app.get('/api/v1/profile/:address', async (req, res) => {
 
     res.json(profile);
   } catch (error: any) {
-    console.error('Profile error:', error);
-    
+    logger.error('Profile error', { error: error?.message, address: req.params.address });
     // Check if it's a "not found" type error
     if (error.message?.includes('not found') || error.message?.includes('No data')) {
       return res.status(404).json({ 
@@ -309,27 +368,25 @@ app.get('/api/v1/profile/:address', async (req, res) => {
 // WebSocket server
 const server = createServer(app);
 const wss = new WebSocketServer({ server });
+setWebSocketServer(wss);
 
 wss.on('connection', (ws) => {
   console.log('WebSocket client connected');
-  
+
   ws.on('message', (message) => {
     try {
       const data = JSON.parse(message.toString());
-      console.log('Received:', data);
-      
-      // Handle subscription
       if (data.type === 'subscribe' && data.address) {
-        ws.send(JSON.stringify({ 
-          type: 'subscribed', 
-          address: data.address 
-        }));
+        ws.send(JSON.stringify({ type: 'subscribed', address: data.address }));
+      }
+      if (data.type === 'unsubscribe' && data.address) {
+        // subscription tracking can be added here if needed
       }
     } catch (error) {
       console.error('Error parsing message:', error);
     }
   });
-  
+
   ws.on('close', () => {
     console.log('WebSocket client disconnected');
   });
@@ -353,10 +410,10 @@ server.listen(PORT, () => {
 
 // Handle uncaught exceptions gracefully
 process.on('uncaughtException', (error) => {
-  console.error('❌ Uncaught Exception:', error);
-  // Don't exit in production - let Railway handle restarts
+  captureException(error);
+  logger.error('Uncaught Exception', { error: error.message, stack: error.stack });
   if (process.env.NODE_ENV === 'production') {
-    console.error('Continuing in production mode...');
+    logger.error('Continuing in production mode...');
   } else {
     process.exit(1);
   }
@@ -364,8 +421,8 @@ process.on('uncaughtException', (error) => {
 
 // Handle unhandled promise rejections
 process.on('unhandledRejection', (reason, promise) => {
-  console.error('❌ Unhandled Rejection at:', promise, 'reason:', reason);
-  // Don't exit in production
+  captureException(reason);
+  logger.error('Unhandled Rejection', { reason: String(reason) });
   if (process.env.NODE_ENV !== 'production') {
     process.exit(1);
   }
