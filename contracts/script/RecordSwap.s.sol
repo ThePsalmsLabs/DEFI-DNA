@@ -12,7 +12,7 @@ contract RecordSwap is Script {
     using PoolIdLibrary for PoolKey;
     
     // Base Mainnet DNASubscriber
-    DNASubscriber constant dnaSubscriber = DNASubscriber(0xeac0cccaf338264f74d6bb7e033a24df8b201884);
+    DNASubscriber constant dnaSubscriber = DNASubscriber(0xeAC0CCcaf338264f74D6Bb7E033A24Df8b201884);
     
     // Base Mainnet token addresses
     address constant WETH = 0x4200000000000000000000000000000000000006;
@@ -30,8 +30,8 @@ contract RecordSwap is Script {
         
         PoolId poolId = poolKey.toId();
         
-        // Exact values to use
-        address user = 0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb;
+        // Exact values to use (use any valid checksummed address)
+        address user = 0x742D35CC6634c0532925A3b844BC9E7595F0BEb0;
         uint128 volumeUsd = 1000 * 1e18; // $1,000
         
         console.log("=== recordSwap Call ===");
@@ -46,7 +46,7 @@ contract RecordSwap is Script {
         // Call recordSwap
         dnaSubscriber.recordSwap(user, poolId, volumeUsd);
         
-        console.log("✅ Swap recorded successfully!");
+        console.log("Swap recorded successfully.");
         
         vm.stopBroadcast();
     }
